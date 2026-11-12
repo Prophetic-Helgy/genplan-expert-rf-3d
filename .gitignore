@@ -1,0 +1,12 @@
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+.vite/
+.claude/
+.aistudio/
+.DS_Store
+*.log
+*.webm
+.env*
