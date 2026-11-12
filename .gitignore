@@ -9,4 +9,7 @@ coverage/
 .DS_Store
 *.log
 *.webm
+*.mp4
+genplan-thumbnail.jpg
+contact-sheet.jpg
 .env*
