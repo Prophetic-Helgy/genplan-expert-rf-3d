@@ -36,7 +36,8 @@ import {
   getObjectCategoryCapabilities,
   getDefaultPipelineDiameterMm,
   getEffectivePlotRelief,
-  calculatePlotReliefAndDrainage
+  calculatePlotReliefAndDrainage,
+  calculateWindRoseAndLoads
 } from '../utils/calculations';
 import { buildSiteObject3DGroup } from '../utils/roofGeometry3D';
 import { BUILDING_CATEGORY_LABELS } from '../data/regions';
@@ -153,6 +154,7 @@ export const Viewport2D3D: React.FC<Viewport2D3DProps> = ({
     controls: OrbitControls;
     sunLight: THREE.DirectionalLight;
     hemiLight: THREE.HemisphereLight;
+    outerTerrain: THREE.Mesh;
     dynamicGroup: THREE.Group;
     interactableMeshes: THREE.Object3D[];
     requestRender: () => void;
@@ -394,6 +396,7 @@ export const Viewport2D3D: React.FC<Viewport2D3DProps> = ({
       controls,
       sunLight,
       hemiLight,
+      outerTerrain,
       dynamicGroup,
       interactableMeshes: [],
       requestRender
@@ -424,10 +427,35 @@ export const Viewport2D3D: React.FC<Viewport2D3DProps> = ({
     };
   }, []);
 
-  // Rebuild 3D dynamic meshes & update sun position when plot/objects/sun change
-  useEffect(() => {
+  const promoRenderCacheRef = useRef<{
+    cacheKey: string;
+    savedCamPos: THREE.Vector3 | null;
+    savedTarget: THREE.Vector3 | null;
+  }>({
+    cacheKey: '',
+    savedCamPos: null,
+    savedTarget: null
+  });
+
+  // Helper to populate 3D dynamic meshes & update sun position from either current state or promo scene override
+  const populateThreeDynamicScene = (customState?: Partial<typeof stateRef.current>) => {
     const ctx = threeCtxRef.current;
     if (!ctx) return;
+
+    const merged = { ...stateRef.current, ...customState };
+    const {
+      plot,
+      objects,
+      selectedObjectId,
+      selectedEdgeIndex,
+      violations,
+      dayOfYear,
+      hourOfDay,
+      showForbiddenZones,
+      xrayWallsMode,
+      undergroundViewMode,
+      thermalHeatmapMode
+    } = merged;
 
     const { dynamicGroup, sunLight, requestRender } = ctx;
 
@@ -455,6 +483,9 @@ export const Viewport2D3D: React.FC<Viewport2D3DProps> = ({
     const region = getEffectivePlotRegion(plot);
     ctx.controls.maxDistance = Math.max(180, Math.hypot(baseField.fieldWidth, baseField.fieldLength) * 1.15);
 
+    // Move opaque outerTerrain down to -28m in undergroundViewMode so it NEVER occludes basements (-2.4m) or buried pipes (-1.8m)
+    ctx.outerTerrain.position.y = undergroundViewMode ? -28 : -0.08;
+
     const baseFieldGeo = new THREE.PlaneGeometry(baseField.fieldWidth, baseField.fieldLength);
     baseFieldGeo.rotateX(-Math.PI / 2);
     const baseFieldMat = new THREE.MeshStandardMaterial({
@@ -462,22 +493,22 @@ export const Viewport2D3D: React.FC<Viewport2D3DProps> = ({
       roughness: 0.94,
       metalness: 0.03,
       transparent: undergroundViewMode,
-      opacity: undergroundViewMode ? 0.25 : 1.0,
+      opacity: undergroundViewMode ? 0.14 : 1.0,
       depthWrite: !undergroundViewMode
     });
     const baseFieldMesh = new THREE.Mesh(baseFieldGeo, baseFieldMat);
     baseFieldMesh.position.y = -0.04;
-    baseFieldMesh.receiveShadow = true;
+    baseFieldMesh.receiveShadow = !undergroundViewMode;
     dynamicGroup.add(baseFieldMesh);
 
-    // When Underground View Mode is enabled, render regional Frost Depth Plane (-region.frostDepth)
+    // When Underground View Mode is enabled, render regional Frost Depth Plane (-region.frostDepth) and Subterranean Depth Grid
     if (undergroundViewMode) {
       const frostGeo = new THREE.PlaneGeometry(baseField.fieldWidth * 0.75, baseField.fieldLength * 0.75);
       frostGeo.rotateX(-Math.PI / 2);
       const frostMat = new THREE.MeshBasicMaterial({
         color: 0x0ea5e9,
         transparent: true,
-        opacity: 0.14,
+        opacity: 0.16,
         side: THREE.DoubleSide,
         depthWrite: false
       });
@@ -485,6 +516,17 @@ export const Viewport2D3D: React.FC<Viewport2D3DProps> = ({
       frostMesh.position.y = -region.frostDepth;
       frostMesh.userData = { isFrostDepthPlane: true, frostDepth: region.frostDepth };
       dynamicGroup.add(frostMesh);
+
+      // Subterranean boundary wireframe box under the plot (from y = 0 down to y = -3.2m) so underground depth is unmistakable
+      const subBoxDepth = Math.max(3.2, region.frostDepth + 1.2);
+      const subBoxGeo = new THREE.EdgesGeometry(new THREE.BoxGeometry(plot.width, subBoxDepth, plot.length));
+      const subBoxWire = new THREE.LineSegments(
+        subBoxGeo,
+        new THREE.LineBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.65 })
+      );
+      subBoxWire.position.set(0, -subBoxDepth / 2, 0);
+      subBoxWire.userData = { isSubterraneanCutawayFrame: true };
+      dynamicGroup.add(subBoxWire);
     }
 
     // Rectangular 5m & 1m grid across exact baseField.fieldWidth × baseField.fieldLength
@@ -596,12 +638,12 @@ export const Viewport2D3D: React.FC<Viewport2D3DProps> = ({
         roughness: 0.9,
         metalness: 0.05,
         transparent: undergroundViewMode,
-        opacity: undergroundViewMode ? 0.30 : 1.0,
+        opacity: undergroundViewMode ? 0.18 : 1.0,
         depthWrite: !undergroundViewMode
       });
       const plotMesh = new THREE.Mesh(plotGeo, plotMat);
       plotMesh.position.y = -0.06;
-      plotMesh.receiveShadow = true;
+      plotMesh.receiveShadow = !undergroundViewMode;
       dynamicGroup.add(plotMesh);
 
       // 1b. 3D Terrain Surface Slope & Automatic Stormwater Drainage Zones (when showDrainageZones is enabled)
@@ -889,10 +931,16 @@ export const Viewport2D3D: React.FC<Viewport2D3DProps> = ({
           const roadW = edgeCfg.type === 'street' ? 6 : 3.5;
           const roadGeo = new THREE.PlaneGeometry(len + 12, roadW);
           roadGeo.rotateX(-Math.PI / 2);
-          const roadMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.85 });
+          const roadMat = new THREE.MeshStandardMaterial({
+            color: 0x334155,
+            roughness: 0.85,
+            transparent: undergroundViewMode,
+            opacity: undergroundViewMode ? 0.16 : 1.0,
+            depthWrite: !undergroundViewMode
+          });
           const roadMesh = new THREE.Mesh(roadGeo, roadMat);
           roadMesh.position.set(0, 0.01, roadW / 2 + 0.6);
-          roadMesh.receiveShadow = true;
+          roadMesh.receiveShadow = !undergroundViewMode;
           fenceGroup.add(roadMesh);
         }
 
@@ -972,11 +1020,333 @@ export const Viewport2D3D: React.FC<Viewport2D3DProps> = ({
       new THREE.SphereGeometry(1.4, 16, 16),
       new THREE.MeshBasicMaterial({ color: 0xfacc15 })
     );
+    sunOrb.name = 'sun-orb-indicator';
     sunOrb.position.set(sunPos.x, sunPos.y, sunPos.z);
     dynamicGroup.add(sunOrb);
 
-    requestRender();
+    if (!customState) {
+      ctx.renderer.render(ctx.scene, ctx.camera);
+      requestRender();
+    }
+  };
+
+  // Rebuild 3D dynamic meshes & update sun position when plot/objects/sun change
+  useEffect(() => {
+    promoRenderCacheRef.current.cacheKey = '';
+    populateThreeDynamicScene();
   }, [plot, objects, selectedObjectId, selectedEdgeIndex, violations, dayOfYear, hourOfDay, showForbiddenZones, xrayWallsMode, undergroundViewMode, thermalHeatmapMode, viewMode]);
+
+  // Register synchronous live 3D WebGL / 2D CAD canvas renderer for Promo Video Studio & MP4 Export
+  useEffect(() => {
+    const win = window as unknown as {
+      __renderLiveViewportCanvasForPromo?: (opts: {
+        sceneId: string;
+        viewMode: '3d' | '2d';
+        sceneLocalProgress01: number;
+        appAction?: {
+          showForbiddenZones?: boolean;
+          xrayWallsMode?: boolean;
+          undergroundViewMode?: boolean;
+          thermalHeatmapMode?: boolean;
+          showDrainageZones?: boolean;
+          dayOfYear?: number;
+          hourOfDay?: number;
+        };
+      }) => HTMLCanvasElement | null;
+      __restoreViewportAfterPromo?: () => void;
+    };
+
+    win.__renderLiveViewportCanvasForPromo = ({ sceneId, viewMode: targetMode, sceneLocalProgress01, appAction }) => {
+      const prog = Math.max(0, Math.min(1, sceneLocalProgress01 || 0));
+
+      if (targetMode === '2d') {
+        const c2d = canvas2DRef.current;
+        if (c2d && c2d.width > 0 && c2d.height > 0) {
+          return c2d;
+        }
+      }
+
+      const ctx = threeCtxRef.current;
+      if (!ctx) return null;
+
+      const mount = threeMountRef.current;
+      if (
+        mount &&
+        mount.clientWidth > 0 &&
+        mount.clientHeight > 0 &&
+        (ctx.renderer.domElement.width === 0 || ctx.renderer.domElement.height === 0)
+      ) {
+        ctx.renderer.setSize(mount.clientWidth, mount.clientHeight);
+        ctx.camera.aspect = mount.clientWidth / mount.clientHeight;
+        ctx.camera.updateProjectionMatrix();
+      }
+
+      if (!promoRenderCacheRef.current.savedCamPos) {
+        promoRenderCacheRef.current.savedCamPos = ctx.camera.position.clone();
+        promoRenderCacheRef.current.savedTarget = ctx.controls.target.clone();
+      }
+
+      const archStep = sceneId === 'edit_dimensions_floors_roof_windows' ? (prog < 0.33 ? 0 : prog < 0.66 ? 1 : 2) : 0;
+      const cacheKey =
+        sceneId === 'edit_dimensions_floors_roof_windows'
+          ? `arch:${archStep}`
+          : sceneId === 'sun_insolation_xray'
+          ? 'xray3d'
+          : sceneId === 'thermal_heatmap_energy'
+          ? 'thermal3d'
+          : sceneId === 'relief_drainage_underground'
+          ? 'underground3d'
+          : 'standard3d';
+
+      if (promoRenderCacheRef.current.cacheKey !== cacheKey) {
+        const baseObjects = stateRef.current.objects;
+        let customObjects: SiteObject[] = baseObjects.map((o) => ({ ...o }));
+
+        if (sceneId === 'edit_dimensions_floors_roof_windows') {
+          customObjects = customObjects.map((o) => {
+            if (o.category !== 'house') return o;
+            if (archStep === 0) {
+              return {
+                ...o,
+                width: 8,
+                length: 9,
+                floors: 1,
+                wallHeight: 3.2,
+                roofHeight: 2.2,
+                roofType: 'gable',
+                windows: { south: 2, north: 1, east: 1, west: 1 }
+              };
+            }
+            if (archStep === 1) {
+              return {
+                ...o,
+                width: 10,
+                length: 11,
+                floors: 2,
+                wallHeight: 6.2,
+                roofHeight: 2.6,
+                roofType: 'hip',
+                windows: { south: 3, north: 2, east: 2, west: 2 }
+              };
+            }
+            return {
+              ...o,
+              width: 11,
+              length: 12,
+              floors: 3,
+              wallHeight: 9.0,
+              roofHeight: 2.8,
+              roofType: 'gable',
+              windows: { south: 3, north: 2, east: 3, west: 2 }
+            };
+          });
+        } else if (sceneId === 'sun_insolation_xray') {
+          customObjects = customObjects.map((o) =>
+            o.category === 'house'
+              ? {
+                  ...o,
+                  floors: Math.max(3, o.floors || 3),
+                  wallHeight: Math.max(8.8, o.wallHeight || 8.8),
+                  windows: { south: 2, north: 1, east: 2, west: 1 }
+                }
+              : o
+          );
+        } else if (sceneId === 'relief_drainage_underground') {
+          customObjects = customObjects.map((o) =>
+            o.category === 'house'
+              ? { ...o, hasBasement: true, basementDepth: 2.5, foundationType: 'slab' }
+              : o
+          );
+          if (!customObjects.some((o) => o.category === 'water_main')) {
+            customObjects.push({
+              id: 'promo-water-main-3d',
+              name: 'Напорный водопровод ПНД (Ø110 мм)',
+              category: 'water_main',
+              x: -4.5,
+              z: 3.2,
+              width: 14,
+              length: 0.8,
+              wallHeight: 0.2,
+              roofHeight: 0,
+              overhang: 0,
+              floors: 1,
+              rotation: 18,
+              material: 'stone',
+              roofType: 'flat',
+              slopeDirection: 'south',
+              glazingRatio: 0,
+              partitionLength: 0,
+              wallMaterialId: 'aerated_concrete',
+              roofCoverId: 'metal_tile',
+              foundationTypeId: 'slab',
+              burialDepth: 1.8,
+              pipelineDiameterMm: 110
+            });
+          }
+        }
+
+        const basePlot = stateRef.current.plot;
+        const customPlot: PlotConfig =
+          appAction?.showDrainageZones !== undefined
+            ? {
+                ...basePlot,
+                relief: {
+                  ...getEffectivePlotRelief(basePlot),
+                  showDrainageZones: appAction.showDrainageZones
+                }
+              }
+            : basePlot;
+
+        populateThreeDynamicScene({
+          plot: customPlot,
+          objects: customObjects,
+          showForbiddenZones: appAction?.showForbiddenZones ?? stateRef.current.showForbiddenZones,
+          xrayWallsMode: appAction?.xrayWallsMode ?? stateRef.current.xrayWallsMode,
+          undergroundViewMode: appAction?.undergroundViewMode ?? stateRef.current.undergroundViewMode,
+          thermalHeatmapMode: appAction?.thermalHeatmapMode ?? stateRef.current.thermalHeatmapMode,
+          dayOfYear: appAction?.dayOfYear ?? stateRef.current.dayOfYear,
+          hourOfDay: appAction?.hourOfDay ?? stateRef.current.hourOfDay
+        });
+
+        promoRenderCacheRef.current.cacheKey = cacheKey;
+      }
+
+      // Per-frame smooth 3D object & sun animations
+      const houseObj = stateRef.current.objects.find((o) => o.category === 'house');
+      const houseBaseX = houseObj ? houseObj.x : -2;
+      const houseBaseZ = houseObj ? houseObj.z : -2;
+
+      if (sceneId === 'drag_and_drop_placement') {
+        const ease = prog * prog * (3 - 2 * prog);
+        const dragStartX = houseBaseX - 3.6;
+        const dragStartZ = houseBaseZ - 2.8;
+        const curX = dragStartX + (houseBaseX - dragStartX) * ease;
+        const curZ = dragStartZ + (houseBaseZ - dragStartZ) * ease;
+        const houseGroup = ctx.interactableMeshes.find((m) => m.userData?.category === 'house');
+        if (houseGroup) {
+          houseGroup.position.set(curX, 0, curZ);
+        }
+      } else if (sceneId === 'sun_insolation_xray') {
+        const animHour = 8.5 + prog * 9.5;
+        const sunPos = computeSunVector(stateRef.current.plot, 172, animHour);
+        ctx.sunLight.position.set(sunPos.x, sunPos.y, sunPos.z);
+        if (sunPos.altitudeDeg < 15) {
+          ctx.sunLight.color.setHex(0xfde68a);
+          ctx.sunLight.intensity = 1.35;
+        } else {
+          ctx.sunLight.color.setHex(0xfffbeb);
+          ctx.sunLight.intensity = 1.95;
+        }
+        const orb = ctx.dynamicGroup.getObjectByName('sun-orb-indicator');
+        if (orb) {
+          orb.position.set(sunPos.x, sunPos.y, sunPos.z);
+        }
+      }
+
+      // Per-frame smooth 3D camera orbit tailored to each scene
+      let lookX = 0;
+      let lookY = 1.2;
+      let lookZ = 0;
+      let dist = 36;
+      let camY = 23;
+      let baseAngle = 0.42;
+      let sweep = 0.58;
+
+      if (sceneId === 'site_3d_precision') {
+        baseAngle = 0.38;
+        sweep = 0.62;
+        dist = 36;
+        camY = 23;
+        lookY = 1.5;
+      } else if (sceneId === 'drag_and_drop_placement') {
+        baseAngle = -0.32;
+        sweep = 0.45;
+        dist = 33;
+        camY = 25;
+        lookY = 1.0;
+      } else if (sceneId === 'edit_dimensions_floors_roof_windows') {
+        lookX = houseBaseX;
+        lookY = 3.2;
+        lookZ = houseBaseZ;
+        baseAngle = 0.52;
+        sweep = 0.72;
+        dist = 22;
+        camY = 12.5;
+      } else if (sceneId === 'sun_insolation_xray') {
+        lookX = houseBaseX * 0.5;
+        lookY = 2.2;
+        lookZ = houseBaseZ * 0.5;
+        baseAngle = -0.45;
+        sweep = 0.58;
+        dist = 29;
+        camY = 18;
+      } else if (sceneId === 'roof_snow_foundation') {
+        baseAngle = 0.28;
+        sweep = 0.54;
+        dist = 34;
+        camY = 21;
+        lookY = 1.5;
+      } else if (sceneId === 'thermal_heatmap_energy') {
+        lookX = houseBaseX;
+        lookY = 2.8;
+        lookZ = houseBaseZ;
+        baseAngle = -0.42;
+        sweep = 0.64;
+        dist = 23;
+        camY = 13;
+      } else if (sceneId === 'relief_drainage_underground') {
+        lookX = houseBaseX * 0.6;
+        lookY = -0.6;
+        lookZ = houseBaseZ * 0.6;
+        baseAngle = 0.36;
+        sweep = 0.62;
+        dist = 26;
+        camY = 9.2;
+      } else if (sceneId === 'legal_claim_defense') {
+        baseAngle = -0.58;
+        sweep = 0.54;
+        dist = 32;
+        camY = 17.5;
+        lookY = 1.8;
+      } else if (sceneId === 'bom_market_pdf_mcp') {
+        baseAngle = 0.22;
+        sweep = 0.68;
+        dist = 33 + prog * 5;
+        camY = 21 + prog * 4;
+        lookY = 1.5;
+      }
+
+      const angle = baseAngle + (prog - 0.5) * sweep;
+      ctx.camera.position.set(
+        lookX + Math.sin(angle) * dist,
+        camY,
+        lookZ + Math.cos(angle) * dist
+      );
+      ctx.camera.lookAt(lookX, lookY, lookZ);
+      ctx.controls.target.set(lookX, lookY, lookZ);
+
+      ctx.renderer.render(ctx.scene, ctx.camera);
+      return ctx.renderer.domElement;
+    };
+
+    win.__restoreViewportAfterPromo = () => {
+      const ctx = threeCtxRef.current;
+      if (ctx && promoRenderCacheRef.current.savedCamPos && promoRenderCacheRef.current.savedTarget) {
+        ctx.camera.position.copy(promoRenderCacheRef.current.savedCamPos);
+        ctx.controls.target.copy(promoRenderCacheRef.current.savedTarget);
+        ctx.camera.lookAt(ctx.controls.target);
+        promoRenderCacheRef.current.savedCamPos = null;
+        promoRenderCacheRef.current.savedTarget = null;
+      }
+      promoRenderCacheRef.current.cacheKey = '';
+      populateThreeDynamicScene();
+    };
+
+    return () => {
+      delete win.__renderLiveViewportCanvasForPromo;
+      delete win.__restoreViewportAfterPromo;
+    };
+  }, []);
 
   // Render 2D CAD Blueprint Canvas whenever state changes
   useEffect(() => {
@@ -2070,7 +2440,7 @@ export const Viewport2D3D: React.FC<Viewport2D3DProps> = ({
       {/* Isolated 3D WebGL Canvas Mount */}
       <div
         ref={threeMountRef}
-        className={`w-full h-full ${viewMode === '3d' ? 'block' : 'hidden'}`}
+        className={`w-full h-full ${viewMode === '3d' ? 'block' : 'opacity-0 pointer-events-none absolute inset-0'}`}
       />
 
       {/* Interactive 2D CAD Blueprint Canvas */}
@@ -2079,23 +2449,23 @@ export const Viewport2D3D: React.FC<Viewport2D3DProps> = ({
         onPointerDown={handle2DPointerDown}
         onPointerMove={handle2DPointerMove}
         onPointerUp={handle2DPointerUp}
-        className={`w-full h-full cursor-grab active:cursor-grabbing ${viewMode === '2d' ? 'block' : 'hidden'}`}
+        className={`w-full h-full cursor-grab active:cursor-grabbing ${viewMode === '2d' ? 'block' : 'opacity-0 pointer-events-none absolute inset-0'}`}
       />
 
       {/* Top-Left Minimal Spec, Mode Controls & Floating Selected Building Quick-Edit Bar */}
-      <div className="absolute top-3 left-3 right-24 z-10 flex flex-col gap-2 pointer-events-none">
-        <div className="flex flex-wrap items-center gap-2 pointer-events-auto">
-          <div className="flex items-center gap-1 p-1 bg-slate-900/95 border border-slate-700/80 rounded-lg">
-            <span className="px-2.5 py-1 text-xs font-semibold text-slate-200 whitespace-nowrap">
-              {viewMode === '3d' ? '3D Сцена (Orbit + Перетаскивание)' : '2D Генплан (Чертеж отступов)'}
+      <div className="absolute top-3 left-3 right-[332px] z-10 flex flex-col items-start gap-2 pointer-events-none">
+        <div className="w-fit max-w-full flex flex-wrap items-center gap-1.5 pointer-events-auto">
+          <div className="w-fit max-w-full flex flex-wrap items-center gap-x-1.5 gap-y-0.5 px-2.5 py-1 bg-slate-900/95 border border-slate-700/80 rounded-lg text-[11px]">
+            <span className="font-semibold text-slate-200 whitespace-nowrap">
+              {viewMode === '3d' ? '3D Сцена' : '2D Генплан'}
             </span>
             <span className="text-slate-600">·</span>
-            <span className="px-2 py-1 text-xs font-mono text-sky-400 whitespace-nowrap">
+            <span className="font-mono text-sky-400 whitespace-nowrap">
               Солнце: выс. {sunTelemetry.altitudeDeg}° / аз. {sunTelemetry.azimuthDeg}°
             </span>
             <span className="text-slate-600">·</span>
             <span
-              className="px-2 py-1 text-xs font-mono text-emerald-400 whitespace-nowrap"
+              className="font-mono text-emerald-400 whitespace-nowrap"
               data-testid="viewport-base-field-badge"
               title="Автоматический размер базового поля вокруг участка (стандартно в 4 раза шире и длиннее участка)"
             >
@@ -2494,73 +2864,229 @@ export const Viewport2D3D: React.FC<Viewport2D3DProps> = ({
             })()}
           </div>
         )}
+
+        {/* 3D Subterranean Cutaway HUD when Underground View Mode is active */}
+        {undergroundViewMode && (
+          <div
+            className="p-2.5 bg-slate-900/95 border border-cyan-500/70 rounded-xl shadow-xl w-[min(540px,95vw)] pointer-events-auto space-y-1.5"
+            data-testid="underground-view-hud"
+          >
+            {(() => {
+              const region = getEffectivePlotRegion(plot);
+              const basementObjs = objects.filter((o) => Boolean(o.hasBasement));
+              const buriedUtilObjs = objects.filter(
+                (o) =>
+                  (o.category === 'water_main' ||
+                    o.category === 'sewer_main' ||
+                    o.category === 'gas_pipe' ||
+                    o.category === 'well' ||
+                    o.category === 'neighbor_well' ||
+                    o.category === 'toilet') &&
+                  (o.burialDepth ?? getDefaultBurialDepth(o.category)) > 0
+              );
+              return (
+                <>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs font-bold text-cyan-300">
+                      Подземный 3D-разрез участка (Грунт прозрачный)
+                    </span>
+                    <span className="text-[11px] font-mono text-sky-300 bg-sky-950/80 border border-sky-700/60 px-2 py-0.5 rounded whitespace-nowrap">
+                      Глубина промерзания d_f: −{region.frostDepth} м
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-[11px]">
+                    {basementObjs.length > 0 ? (
+                      basementObjs.map((bo) => (
+                        <button
+                          key={bo.id}
+                          type="button"
+                          onClick={() => onSelectObject(bo.id)}
+                          data-testid={`underground-hud-basement-${bo.id}`}
+                          className={`p-1.5 rounded border text-left flex items-center justify-between gap-2 transition-colors ${
+                            selectedObjectId === bo.id
+                              ? 'bg-sky-950/90 border-sky-400 text-white'
+                              : 'bg-slate-950/90 border-slate-800 text-slate-200 hover:border-sky-500/60'
+                          }`}
+                        >
+                          <span className="truncate font-semibold text-sky-300">
+                            Подземный этаж: {bo.name}
+                          </span>
+                          <span className="font-mono text-cyan-300 shrink-0">
+                            −{formatMetersMm(bo.basementDepth ?? 2.4)} м
+                          </span>
+                        </button>
+                      ))
+                    ) : (
+                      <div className="p-1.5 rounded bg-slate-950/80 border border-slate-800 text-slate-400 text-[10px]">
+                        Подземный этаж не включен (включите «Подземный этаж» в параметрах дома)
+                      </div>
+                    )}
+                    {buriedUtilObjs.map((uo) => {
+                      const depth = uo.burialDepth ?? getDefaultBurialDepth(uo.category);
+                      const isFrozenRisk =
+                        (uo.category === 'water_main' || uo.category === 'sewer_main') &&
+                        depth < region.frostDepth;
+                      return (
+                        <button
+                          key={uo.id}
+                          type="button"
+                          onClick={() => onSelectObject(uo.id)}
+                          data-testid={`underground-hud-pipe-${uo.id}`}
+                          className={`p-1.5 rounded border text-left flex items-center justify-between gap-2 transition-colors ${
+                            selectedObjectId === uo.id
+                              ? 'bg-cyan-950/90 border-cyan-400 text-white'
+                              : 'bg-slate-950/90 border-slate-800 text-slate-200 hover:border-cyan-500/60'
+                          }`}
+                        >
+                          <span className="truncate font-medium">
+                            {uo.name}
+                            {uo.pipelineDiameterMm ? ` (Ø${uo.pipelineDiameterMm}мм)` : ''}
+                          </span>
+                          <span
+                            className={`font-mono shrink-0 ${
+                              isFrozenRisk ? 'text-amber-300 font-bold' : 'text-cyan-300'
+                            }`}
+                          >
+                            −{formatMetersMm(depth)} м
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        )}
       </div>
 
-      {/* Top-Right Animated Dynamic Compass Widget */}
+      {/* Top-Right Regional Wind Rose Widget (Left) & Animated Dynamic Compass (Right) with identical height */}
       <div
-        className="absolute top-3 right-3 z-10 flex flex-col items-center p-2 bg-slate-900/95 border border-slate-700/80 rounded-xl shadow-lg pointer-events-auto"
-        data-testid="animated-compass"
-        aria-label={`Компас: Север ${plot.northAngle}°`}
+        data-testid="viewport-top-right-hud"
+        className="absolute top-3 right-3 z-10 flex flex-row items-stretch gap-2 pointer-events-none"
       >
-        <div className="relative w-16 h-16 flex items-center justify-center">
-          {/* Outer Static Degree Ring */}
-          <svg className="w-16 h-16 text-slate-700" viewBox="0 0 64 64" fill="none">
-            <circle cx="32" cy="32" r="29" stroke="currentColor" strokeWidth="1.5" />
-            <circle cx="32" cy="32" r="25" stroke="currentColor" strokeWidth="1" strokeDasharray="2 3" />
-          </svg>
+        {/* Regional Wind Rose Mini-Diagram & Wind Load Badge (Left of Compass, same height h-[104px]) */}
+        {(() => {
+          const windData = calculateWindRoseAndLoads(plot, objects, selectedObj);
+          const polyPts = windData.sectors
+            .map((s) => {
+              const rad = ((s.plotAngleDeg - 90) * Math.PI) / 180;
+              const r = 6 + (s.frequencyPercent / 28) * 18;
+              const x = (28 + Math.cos(rad) * r).toFixed(1);
+              const y = (28 + Math.sin(rad) * r).toFixed(1);
+              return `${x},${y}`;
+            })
+            .join(' ');
+          return (
+            <div
+              className="h-[104px] px-2.5 py-2 bg-slate-900/95 border border-slate-700/80 rounded-xl shadow-lg pointer-events-auto flex items-center gap-2.5 shrink-0"
+              data-testid="viewport-wind-rose-widget"
+              title={`Роза ветров региона (${windData.regionName}): ${windData.windZone} ветровой район, w₀ = ${windData.windPressureW0KgM2} кг/м², господствующий ветер — ${windData.prevailingWindLabel}`}
+            >
+              <svg className="w-16 h-16 shrink-0" viewBox="0 0 56 56">
+                <circle cx="28" cy="28" r="22" fill="none" stroke="#334155" strokeWidth="1" strokeDasharray="2 2" />
+                <circle cx="28" cy="28" r="12" fill="none" stroke="#1e293b" strokeWidth="1" />
+                <line x1="28" y1="4" x2="28" y2="52" stroke="#1e293b" strokeWidth="1" />
+                <line x1="4" y1="28" x2="52" y2="28" stroke="#1e293b" strokeWidth="1" />
+                <polygon
+                  points={polyPts}
+                  fill="rgba(56, 189, 248, 0.32)"
+                  stroke="#38bdf8"
+                  strokeWidth="1.5"
+                />
+                {windData.sectors.map((s) => {
+                  if (!s.isPrevailing) return null;
+                  const rad = ((s.plotAngleDeg - 90) * Math.PI) / 180;
+                  const r = 6 + (s.frequencyPercent / 28) * 18;
+                  const cx = 28 + Math.cos(rad) * r;
+                  const cy = 28 + Math.sin(rad) * r;
+                  return <circle key={s.dir} cx={cx} cy={cy} r="2.8" fill="#f59e0b" />;
+                })}
+              </svg>
+              <div className="flex flex-col justify-between h-full py-0.5 leading-tight">
+                <div className="text-[10px] font-bold text-sky-400 uppercase tracking-wider whitespace-nowrap">
+                  Роза ветров ({windData.windZone} р-н)
+                </div>
+                <div className="text-[10px] font-medium text-slate-300 whitespace-nowrap">
+                  Ветер: {windData.prevailingWindDir} ({windData.prevailingWindLabel.split(' ')[0]})
+                </div>
+                <div className="text-[10px] font-mono text-slate-200 whitespace-nowrap">
+                  {windData.avgWindSpeedMs}–{windData.maxGustWindSpeedMs} м/с
+                </div>
+                <div className="text-[10px] font-mono font-semibold text-amber-300 whitespace-nowrap">
+                  w₀: {windData.windPressureW0KgM2} кг/м²
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
-          {/* Animated Rotating Compass Dial & Needle */}
-          <div
-            className="absolute inset-0 flex items-center justify-center transition-transform duration-300 ease-out"
-            style={{ transform: `rotate(${plot.northAngle}deg)` }}
-          >
-            <svg className="w-16 h-16" viewBox="0 0 64 64" fill="none">
-              {/* Cardinal Direction Labels */}
-              <text
-                x="32"
-                y="11"
-                textAnchor="middle"
-                className="fill-red-400 font-bold text-[9px]"
-              >
-                С
-              </text>
-              <text
-                x="32"
-                y="59"
-                textAnchor="middle"
-                className="fill-slate-400 font-semibold text-[8px]"
-              >
-                Ю
-              </text>
-              <text
-                x="56"
-                y="35"
-                textAnchor="middle"
-                className="fill-slate-400 font-semibold text-[8px]"
-              >
-                В
-              </text>
-              <text
-                x="8"
-                y="35"
-                textAnchor="middle"
-                className="fill-slate-400 font-semibold text-[8px]"
-              >
-                З
-              </text>
-
-              {/* North Red Pointer Needle */}
-              <polygon points="32,14 36,32 28,32" fill="#ef4444" />
-              {/* South Slate Pointer Needle */}
-              <polygon points="32,50 36,32 28,32" fill="#64748b" />
-              {/* Center Pivot Pin */}
-              <circle cx="32" cy="32" r="2.5" fill="#f8fafc" />
+        {/* Animated Dynamic Compass (Right of Wind Rose, same height h-[104px]) */}
+        <div
+          className="h-[104px] px-2.5 py-2 bg-slate-900/95 border border-slate-700/80 rounded-xl shadow-lg pointer-events-auto flex flex-col items-center justify-between shrink-0"
+          data-testid="animated-compass"
+          aria-label={`Компас: Север ${plot.northAngle}°`}
+        >
+          <div className="relative w-16 h-16 flex items-center justify-center shrink-0">
+            {/* Outer Static Degree Ring */}
+            <svg className="w-16 h-16 text-slate-700" viewBox="0 0 64 64" fill="none">
+              <circle cx="32" cy="32" r="29" stroke="currentColor" strokeWidth="1.5" />
+              <circle cx="32" cy="32" r="25" stroke="currentColor" strokeWidth="1" strokeDasharray="2 3" />
             </svg>
+
+            {/* Animated Rotating Compass Dial & Needle */}
+            <div
+              className="absolute inset-0 flex items-center justify-center transition-transform duration-300 ease-out"
+              style={{ transform: `rotate(${plot.northAngle}deg)` }}
+            >
+              <svg className="w-16 h-16" viewBox="0 0 64 64" fill="none">
+                {/* Cardinal Direction Labels */}
+                <text
+                  x="32"
+                  y="11"
+                  textAnchor="middle"
+                  className="fill-red-400 font-bold text-[9px]"
+                >
+                  С
+                </text>
+                <text
+                  x="32"
+                  y="59"
+                  textAnchor="middle"
+                  className="fill-slate-400 font-semibold text-[8px]"
+                >
+                  Ю
+                </text>
+                <text
+                  x="56"
+                  y="35"
+                  textAnchor="middle"
+                  className="fill-slate-400 font-semibold text-[8px]"
+                >
+                  В
+                </text>
+                <text
+                  x="8"
+                  y="35"
+                  textAnchor="middle"
+                  className="fill-slate-400 font-semibold text-[8px]"
+                >
+                  З
+                </text>
+
+                {/* North Red Pointer Needle */}
+                <polygon points="32,14 36,32 28,32" fill="#ef4444" />
+                {/* South Slate Pointer Needle */}
+                <polygon points="32,50 36,32 28,32" fill="#64748b" />
+                {/* Center Pivot Pin */}
+                <circle cx="32" cy="32" r="2.5" fill="#f8fafc" />
+              </svg>
+            </div>
           </div>
+          <span className="text-[11px] font-mono font-semibold text-slate-300 tabular-nums leading-none whitespace-nowrap">
+            С: {plot.northAngle}°
+          </span>
         </div>
-        <span className="mt-0.5 text-[11px] font-mono font-semibold text-slate-300 tabular-nums">
-          С: {plot.northAngle}°
-        </span>
       </div>
     </div>
   );

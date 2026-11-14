@@ -7,6 +7,14 @@
       rel="icon"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230f172a'/%3E%3Cpath d='M10 38 32 19l22 19v17H10z' fill='%2338bdf8'/%3E%3Cpath d='M26 54V40h12v14' fill='%230f172a'/%3E%3C/svg%3E"
     />
+    <script>
+      window.addEventListener('unhandledrejection', function (e) {
+        var msg = String((e && e.reason && (e.reason.message || e.reason)) || '');
+        if (msg.indexOf('WebSocket closed without opened') !== -1 || msg.indexOf('[vite]') !== -1) {
+          e.preventDefault();
+        }
+      }, true);
+    </script>
     <title>ГенПлан-Эксперт РФ 3D — Проектирование участка по СП и СНиП</title>
     <meta name="description" content="Интерактивное 3D-планирование земельного участка, проверка градостроительных и противопожарных норм РФ (СП 53.13330.2019, СП 4.13130.2013), анализ инсоляции, расчет снеговых нагрузок, подбор фундамента и ведомость строительных материалов." />
     <meta property="og:title" content="ГенПлан-Эксперт РФ 3D — Проектирование участка по СП и СНиП" />

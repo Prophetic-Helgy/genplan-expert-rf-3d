@@ -35,7 +35,8 @@ import {
   calculatePlotReliefAndDrainage,
   calculateBillOfMaterials,
   DEFAULT_MATERIAL_UNIT_PRICES,
-  getObjectCategoryCapabilities
+  getObjectCategoryCapabilities,
+  calculateWindRoseAndLoads
 } from './calculations';
 import { buildSiteObject3DGroup, buildRoofOnlyGroup } from './roofGeometry3D';
 import { buildMultiPageJpegPdfBytes } from './pdfReportGenerator';
@@ -1010,9 +1011,13 @@ test('Multi-page binary PDF generator produces valid %PDF-1.4 document with 2 pa
   assert.ok(text.trimEnd().endsWith('%%EOF'), 'PDF must end with %%EOF');
 });
 
-test('Code-generated promotional video script has 8 contiguous scenes with explanatory plaques and live metrics', () => {
-  assert.equal(PROMO_VIDEO_SCENES.length, 8);
-  assert.equal(PROMO_VIDEO_TOTAL_DURATION_SEC, 64);
+test('Code-generated promotional video script has 10 contiguous scenes with explanatory plaques and live metrics', () => {
+  assert.equal(PROMO_VIDEO_SCENES.length, 10);
+  assert.equal(PROMO_VIDEO_TOTAL_DURATION_SEC, 80);
+
+  // Verify Scene 02 (drag_and_drop_placement) and Scene 03 (edit_dimensions_floors_roof_windows) exist
+  assert.equal(PROMO_VIDEO_SCENES[1].visualFocus, 'drag_and_drop_placement');
+  assert.equal(PROMO_VIDEO_SCENES[2].visualFocus, 'edit_dimensions_floors_roof_windows');
 
   let expectedStart = 0;
   for (const scene of PROMO_VIDEO_SCENES) {
@@ -1032,16 +1037,21 @@ test('Code-generated promotional video script has 8 contiguous scenes with expla
   assert.equal(atStart.scene.index, 1);
   assert.equal(atStart.sceneLocalProgress01, 0);
 
-  const atMiddle = getPromoSceneAtTime(20);
-  assert.equal(atMiddle.scene.index, 3);
-  assert.equal(atMiddle.scene.visualFocus, 'sun_insolation_xray');
-  assert.equal(atMiddle.sceneLocalProgress01, 0.5);
+  const atDrag = getPromoSceneAtTime(12);
+  assert.equal(atDrag.scene.index, 2);
+  assert.equal(atDrag.scene.visualFocus, 'drag_and_drop_placement');
+  assert.equal(atDrag.sceneLocalProgress01, 0.5);
 
-  const atEnd = getPromoSceneAtTime(63.9);
-  assert.equal(atEnd.scene.index, 8);
+  const atEdit = getPromoSceneAtTime(20);
+  assert.equal(atEdit.scene.index, 3);
+  assert.equal(atEdit.scene.visualFocus, 'edit_dimensions_floors_roof_windows');
+  assert.equal(atEdit.sceneLocalProgress01, 0.5);
+
+  const atEnd = getPromoSceneAtTime(79.9);
+  assert.equal(atEnd.scene.index, 10);
   assert.ok(atEnd.overallProgress01 > 0.99);
 
-  // Verify Full HD (1920x1080), 2K (2560x1440), and 4K (3840x2160) 16:9 resolutions and MP4 container export
+  // Verify Full HD (1920x1080), 2K (2560x1440), and 4K (3840x2160) 16:9 resolutions and H.264 MP4 container export
   for (const resId of ['1080p', '1440p', '2160p'] as const) {
     const spec = PROMO_VIDEO_RESOLUTIONS[resId];
     assert.equal(spec.aspectRatio, '16:9');
@@ -1051,14 +1061,230 @@ test('Code-generated promotional video script has 8 contiguous scenes with expla
       width: spec.width,
       height: spec.height,
       durationSec: PROMO_VIDEO_TOTAL_DURATION_SEC,
-      fps: 30,
-      frameSamples: [new Uint8Array([0xff, 0xd8, 0xff, 0xd9])]
+      fps: 30
     });
-    const ascii = new TextDecoder('latin1').decode(mp4Bytes);
-    assert.ok(ascii.includes('ftypmp42'), `MP4 for ${resId} must start with ftypmp42 box`);
-    assert.ok(ascii.includes('moov') && ascii.includes('trak') && ascii.includes('avc1') && ascii.includes('mdat'), `MP4 for ${resId} must contain moov, trak, avc1, and mdat boxes`);
+    // Verify native full-resolution H.264 I_PCM frame size (>3MB per 1080p frame, >5.5MB per 2K frame, >12.5MB per 4K frame)
+    const expectedMinBytes =
+      resId === '1080p' ? 3_000_000 : resId === '1440p' ? 5_400_000 : 12_000_000;
+    assert.ok(
+      mp4Bytes.byteLength >= expectedMinBytes,
+      `Native ${resId} MP4 frame must be full resolution (>= ${expectedMinBytes} bytes, got ${mp4Bytes.byteLength})`
+    );
+    const headerAscii = new TextDecoder('latin1').decode(mp4Bytes.slice(0, 1024));
+    assert.ok(headerAscii.includes('ftypisom'), `MP4 for ${resId} must start with ftypisom box`);
+    assert.ok(
+      headerAscii.includes('moov') &&
+        headerAscii.includes('trak') &&
+        headerAscii.includes('avc1') &&
+        headerAscii.includes('avcC') &&
+        headerAscii.includes('stss') &&
+        headerAscii.includes('mdat'),
+      `MP4 for ${resId} must contain moov, trak, avc1, avcC (H.264 SPS/PPS), stss, and mdat boxes`
+    );
   }
 });
 
+test('Regional Wind Rose and Wind Loads on Buildings & Fences (СП 20.13330.2016 Раздел 11)', () => {
+  const moscowWind = calculateWindRoseAndLoads(
+    { ...mockPlot, regionId: 'moscow', northAngle: 0 },
+    [mockHouse],
+    mockHouse
+  );
+  assert.equal(moscowWind.windZone, 'I');
+  assert.equal(moscowWind.windPressureW0KgM2, 23);
+  assert.equal(moscowWind.prevailingWindDir, 'SW');
+  assert.equal(moscowWind.sectors.length, 8);
+  assert.equal(
+    moscowWind.sectors.reduce((acc, s) => acc + s.frequencyPercent, 0),
+    100,
+    '8-direction wind rose frequencies must sum to 100%'
+  );
+  assert.ok(moscowWind.selectedBuildingWind.totalHorizontalForceKn > 0);
+  assert.ok(moscowWind.selectedBuildingWind.overturningMomentKnm > 0);
+  assert.equal(moscowWind.fences.length, 4);
 
+  // Solid fence on edge 0 (street) must have higher wind pressure and bending moment than mesh fence on edge 1 (east neighbor)
+  const northSolidFence = moscowWind.fences[0];
+  const eastMeshFence = moscowWind.fences[1];
+  assert.equal(northSolidFence.fenceType, 'solid');
+  assert.equal(eastMeshFence.fenceType, 'mesh');
+  assert.ok(
+    northSolidFence.designWindPressureKgM2 > eastMeshFence.designWindPressureKgM2 * 3,
+    'Solid corrugated fence must have >3x wind pressure compared to breathable mesh fence'
+  );
+  assert.ok(northSolidFence.bendingMomentPerPostKnm > eastMeshFence.bendingMomentPerPostKnm);
+
+  // High wind region: Norilsk (VII wind zone, w0 = 85 kg/m²) vs Moscow (I wind zone, w0 = 23 kg/m²)
+  const norilskWind = calculateWindRoseAndLoads(
+    { ...mockPlot, regionId: 'norilsk', northAngle: 45 },
+    [mockHouse],
+    mockHouse
+  );
+  assert.equal(norilskWind.windZone, 'VII');
+  assert.equal(norilskWind.windPressureW0KgM2, 85);
+  assert.ok(
+    norilskWind.selectedBuildingWind.totalHorizontalForceKn >
+      moscowWind.selectedBuildingWind.totalHorizontalForceKn * 3.5,
+    'Norilsk VII wind zone building force must be >3.5x Moscow I wind zone force'
+  );
+  assert.equal(norilskWind.fences[0].status, 'high_sail_warning');
+});
+
+test('Underground View Mode renders visible 3D basement below ground and illuminated buried water pipeline with trench', () => {
+  const houseWithBasement: SiteObject = {
+    ...mockHouse,
+    hasBasement: true,
+    basementDepth: 2.4
+  };
+  const houseGroup = buildSiteObject3DGroup(
+    houseWithBasement,
+    false,
+    false,
+    false,
+    false,
+    undefined,
+    true
+  );
+  houseGroup.updateMatrixWorld(true);
+
+  let foundBasementMesh = false;
+  let foundTranslucentAboveGroundWall = false;
+  houseGroup.traverse((child) => {
+    if (child instanceof THREE.Mesh && child.userData?.isBasement) {
+      foundBasementMesh = true;
+      const box = new THREE.Box3().setFromObject(child);
+      assert.ok(box.min.y <= -2.3 && box.max.y <= 0.05, 'Basement mesh must sit below ground (y <= 0)');
+    }
+    if (child instanceof THREE.Mesh && child.position.y > 1.0) {
+      const mat = child.material as THREE.MeshStandardMaterial;
+      if (mat && mat.transparent && mat.opacity <= 0.4) {
+        foundTranslucentAboveGroundWall = true;
+      }
+    }
+  });
+  assert.ok(foundBasementMesh, 'House with hasBasement=true must contain a 3D basement mesh below y=0');
+  assert.ok(
+    foundTranslucentAboveGroundWall,
+    'In undergroundViewMode, above-ground walls must be translucent so the basement below is clearly visible'
+  );
+
+  const waterPipe: SiteObject = {
+    ...mockHouse,
+    id: 'water-main-test',
+    name: 'Водопровод',
+    category: 'water_main',
+    x: 0,
+    z: 4,
+    width: 14,
+    length: 0.6,
+    wallHeight: 0.2,
+    roofHeight: 0,
+    overhang: 0,
+    rotation: 0,
+    material: 'stone',
+    roofType: 'flat',
+    slopeDirection: 'south',
+    burialDepth: 1.8,
+    pipelineDiameterMm: 63
+  };
+  const pipeGroup = buildSiteObject3DGroup(
+    waterPipe,
+    false,
+    false,
+    false,
+    false,
+    undefined,
+    true
+  );
+  pipeGroup.updateMatrixWorld(true);
+
+  let foundUndergroundPipe = false;
+  let foundUndergroundTrench = false;
+  pipeGroup.traverse((child) => {
+    if (child instanceof THREE.Mesh && child.userData?.isUndergroundPipe) {
+      foundUndergroundPipe = true;
+      assert.ok(Math.abs(child.position.y - -1.8) < 0.05, 'Buried water pipe must sit at y = -1.8m');
+    }
+    if (child instanceof THREE.Mesh && child.userData?.isUndergroundTrench) {
+      foundUndergroundTrench = true;
+    }
+  });
+  assert.ok(foundUndergroundPipe, 'Buried water pipeline must create an underground pipe mesh at -burialDepth');
+  assert.ok(foundUndergroundTrench, 'In undergroundViewMode, buried pipeline must render a 3D subterranean trench');
+});
+
+test('Multi-story sunlight patches (световые пятна) render on 1st, 2nd, and 3rd floor slabs in 3D X-Ray mode', () => {
+  const house3Floors: SiteObject = {
+    ...mockHouse,
+    id: 'house-3f-sunpatch',
+    floors: 3,
+    wallHeight: 9.0,
+    windows: { north: 1, south: 2, east: 2, west: 1 }
+  };
+  const sunSE = { x: 18, y: 20, z: 22, altitudeDeg: 38 };
+
+  const allFloorPatches = calculateInteriorSunPatches(house3Floors, sunSE, true);
+  const floor0Patches = allFloorPatches.filter((p) => p.floorIndex === 0);
+  const floor1Patches = allFloorPatches.filter((p) => p.floorIndex === 1);
+  const floor2Patches = allFloorPatches.filter((p) => p.floorIndex === 2);
+
+  assert.equal(floor0Patches.length, 4, '1st floor should have 4 sunlit window patches (2 south + 2 east)');
+  assert.equal(floor1Patches.length, 4, '2nd floor should have 4 sunlit window patches on the 2nd floor slab');
+  assert.equal(floor2Patches.length, 4, '3rd floor should have 4 sunlit window patches on the 3rd floor slab');
+
+  assert.ok(
+    (floor1Patches[0].floorElevationY ?? 0) > (floor0Patches[0].floorElevationY ?? 0) + 2.2,
+    '2nd floor sunlight patch elevation must sit on the 2nd-floor interfloor slab'
+  );
+  assert.ok(
+    (floor2Patches[0].floorElevationY ?? 0) > (floor1Patches[0].floorElevationY ?? 0) + 2.2,
+    '3rd floor sunlight patch elevation must sit on the 3rd-floor interfloor slab'
+  );
+
+  // Verify 3D group places sun patch meshes directly onto 1st, 2nd, and 3rd floor slabs
+  const group3D = buildSiteObject3DGroup(
+    house3Floors,
+    true,
+    false,
+    false,
+    true, // xrayWallsMode = true
+    sunSE,
+    false
+  );
+  group3D.updateMatrixWorld(true);
+
+  const patchElevationsByFloor = new Map<number, number[]>();
+  const interfloorSlabTopYs: number[] = [];
+
+  group3D.traverse((child) => {
+    if (child instanceof THREE.Mesh && child.userData?.isSunPatch) {
+      const fIdx = child.userData.floorIndex ?? 0;
+      const arr = patchElevationsByFloor.get(fIdx) ?? [];
+      arr.push(child.position.y);
+      patchElevationsByFloor.set(fIdx, arr);
+    }
+    if (child instanceof THREE.Mesh && child.userData?.isInterfloorSlab) {
+      const box = new THREE.Box3().setFromObject(child);
+      interfloorSlabTopYs.push(Number(box.max.y.toFixed(3)));
+    }
+  });
+
+  assert.equal(patchElevationsByFloor.get(0)?.length, 4, '3D group must have 4 sun patches on 1st floor');
+  assert.equal(patchElevationsByFloor.get(1)?.length, 4, '3D group must have 4 sun patches on 2nd floor slab');
+  assert.equal(patchElevationsByFloor.get(2)?.length, 4, '3D group must have 4 sun patches on 3rd floor slab');
+  assert.equal(interfloorSlabTopYs.length, 2, '3-story house must have 2 interfloor slabs (2nd and 3rd floors)');
+
+  const sortedSlabTops = interfloorSlabTopYs.sort((a, b) => a - b);
+  const floor1PatchY = patchElevationsByFloor.get(1)![0];
+  const floor2PatchY = patchElevationsByFloor.get(2)![0];
+
+  assert.ok(
+    Math.abs(floor1PatchY - (sortedSlabTops[0] + 0.025)) < 0.01,
+    `2nd floor sun patch (y=${floor1PatchY}) must rest on top of 2nd floor interfloor slab (top=${sortedSlabTops[0]})`
+  );
+  assert.ok(
+    Math.abs(floor2PatchY - (sortedSlabTops[1] + 0.025)) < 0.01,
+    `3rd floor sun patch (y=${floor2PatchY}) must rest on top of 3rd floor interfloor slab (top=${sortedSlabTops[1]})`
+  );
+});
 

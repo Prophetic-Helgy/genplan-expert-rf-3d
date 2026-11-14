@@ -74,7 +74,10 @@ export const SunTimelineBar: React.FC<SunTimelineBarProps> = ({
   };
 
   return (
-    <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 w-[min(1060px,97%)] pointer-events-auto">
+    <div
+      data-testid="sun-timeline-bar"
+      className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 w-[min(680px,95%)] pointer-events-auto"
+    >
       {/* Collapse/Expand Handle */}
       <div className="flex justify-center mb-1">
         <button
@@ -97,15 +100,18 @@ export const SunTimelineBar: React.FC<SunTimelineBarProps> = ({
       </div>
 
       {!isCollapsed && (
-        <div className="p-3 bg-slate-900/95 border border-slate-700/90 rounded-xl shadow-2xl space-y-2.5">
-          {/* Top Row: View Mode Switcher + Visualization Modes + Solstice Presets */}
+        <div
+          data-testid="sun-timeline-panel"
+          className="p-2.5 bg-slate-900/95 border border-slate-700/90 rounded-xl shadow-2xl space-y-2"
+        >
+          {/* Top Row: View Mode Switcher + Visualization Modes */}
           <div className="flex flex-wrap items-center justify-between gap-1.5">
             {/* 2D / 3D Switch */}
-            <div className="flex items-center gap-1 p-1 bg-slate-950 rounded-lg border border-slate-800">
+            <div className="flex items-center gap-1 p-0.5 bg-slate-950 rounded-lg border border-slate-800">
               <button
                 type="button"
                 onClick={() => onToggleViewMode('3d')}
-                className={`px-2.5 py-1 text-xs font-semibold rounded transition-colors whitespace-nowrap ${
+                className={`px-2 py-1 text-[11px] font-semibold rounded transition-colors whitespace-nowrap ${
                   viewMode === '3d'
                     ? 'bg-sky-600 text-white'
                     : 'text-slate-400 hover:text-slate-200'
@@ -116,7 +122,7 @@ export const SunTimelineBar: React.FC<SunTimelineBarProps> = ({
               <button
                 type="button"
                 onClick={() => onToggleViewMode('2d')}
-                className={`px-2.5 py-1 text-xs font-semibold rounded transition-colors whitespace-nowrap ${
+                className={`px-2 py-1 text-[11px] font-semibold rounded transition-colors whitespace-nowrap ${
                   viewMode === '2d'
                     ? 'bg-sky-600 text-white'
                     : 'text-slate-400 hover:text-slate-200'
@@ -127,20 +133,20 @@ export const SunTimelineBar: React.FC<SunTimelineBarProps> = ({
             </div>
 
             {/* Visualization Mode Toggles Group */}
-            <div className="flex flex-wrap items-center gap-1.5">
+            <div className="flex flex-wrap items-center gap-1">
               {/* Semi-Transparent Walls / Sunlight Patch Inside House Toggle */}
               <button
                 type="button"
                 data-testid="toggle-xray-walls"
                 onClick={() => onToggleXrayWalls()}
-                className={`px-2.5 py-1.5 text-xs font-medium rounded-lg border flex items-center gap-1.5 transition-colors whitespace-nowrap ${
+                className={`px-2 py-1 text-[11px] font-medium rounded-lg border flex items-center gap-1 transition-colors whitespace-nowrap ${
                   xrayWallsMode
                     ? 'bg-amber-500/20 border-amber-400 text-amber-200 shadow-sm'
                     : 'bg-slate-950 border-slate-800 text-slate-300 hover:text-white hover:border-slate-700'
                 }`}
                 title="Полупрозрачность стен и крыши для отслеживания светового пятна внутри дома через окна"
               >
-                <Sparkles className={`w-3.5 h-3.5 ${xrayWallsMode ? 'text-amber-400' : 'text-slate-400'}`} />
+                <Sparkles className={`w-3 h-3 ${xrayWallsMode ? 'text-amber-400' : 'text-slate-400'}`} />
                 <span>Световое пятно: {xrayWallsMode ? 'ВКЛ' : 'ВЫКЛ'}</span>
               </button>
 
@@ -149,14 +155,14 @@ export const SunTimelineBar: React.FC<SunTimelineBarProps> = ({
                 type="button"
                 data-testid="toggle-thermal-heatmap"
                 onClick={() => onToggleThermalHeatmap()}
-                className={`px-2.5 py-1.5 text-xs font-medium rounded-lg border flex items-center gap-1.5 transition-colors whitespace-nowrap ${
+                className={`px-2 py-1 text-[11px] font-medium rounded-lg border flex items-center gap-1 transition-colors whitespace-nowrap ${
                   thermalHeatmapMode
                     ? 'bg-rose-500/25 border-rose-400 text-rose-200 shadow-sm'
                     : 'bg-slate-950 border-slate-800 text-slate-300 hover:text-white hover:border-slate-700'
                 }`}
                 title="Тепловая карта фасадов здания: показывает зоны повышенных теплопотерь от материала стен и процента остекления"
               >
-                <Flame className={`w-3.5 h-3.5 ${thermalHeatmapMode ? 'text-rose-400' : 'text-slate-400'}`} />
+                <Flame className={`w-3 h-3 ${thermalHeatmapMode ? 'text-rose-400' : 'text-slate-400'}`} />
                 <span>Тепловая карта: {thermalHeatmapMode ? 'ВКЛ' : 'ВЫКЛ'}</span>
               </button>
 
@@ -165,14 +171,14 @@ export const SunTimelineBar: React.FC<SunTimelineBarProps> = ({
                 type="button"
                 data-testid="toggle-underground-btn"
                 onClick={() => onToggleUndergroundView()}
-                className={`px-2.5 py-1.5 text-xs font-medium rounded-lg border flex items-center gap-1.5 transition-colors whitespace-nowrap ${
+                className={`px-2 py-1 text-[11px] font-medium rounded-lg border flex items-center gap-1 transition-colors whitespace-nowrap ${
                   undergroundViewMode
                     ? 'bg-cyan-500/25 border-cyan-400 text-cyan-200 shadow-sm'
                     : 'bg-slate-950 border-slate-800 text-slate-300 hover:text-white hover:border-slate-700'
                 }`}
                 title="Полупрозрачный грунт для просмотра подземного этажа, плиты фундамента, глубины заложения труб и уровня промерзания"
               >
-                <Layers className={`w-3.5 h-3.5 ${undergroundViewMode ? 'text-cyan-400' : 'text-slate-400'}`} />
+                <Layers className={`w-3 h-3 ${undergroundViewMode ? 'text-cyan-400' : 'text-slate-400'}`} />
                 <span>Подземный вид: {undergroundViewMode ? 'ВКЛ' : 'ВЫКЛ'}</span>
               </button>
 
@@ -180,7 +186,7 @@ export const SunTimelineBar: React.FC<SunTimelineBarProps> = ({
               <button
                 type="button"
                 onClick={onToggleForbiddenZones}
-                className={`px-2.5 py-1.5 text-xs font-medium rounded-lg border flex items-center gap-1.5 transition-colors whitespace-nowrap ${
+                className={`px-2 py-1 text-[11px] font-medium rounded-lg border flex items-center gap-1 transition-colors whitespace-nowrap ${
                   showForbiddenZones
                     ? 'bg-red-950/60 border-red-500/60 text-red-200'
                     : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
@@ -188,42 +194,67 @@ export const SunTimelineBar: React.FC<SunTimelineBarProps> = ({
               >
                 {showForbiddenZones ? (
                   <>
-                    <Eye className="w-3.5 h-3.5 text-red-400" />
+                    <Eye className="w-3 h-3 text-red-400" />
                     Отступы: ВКЛ
                   </>
                 ) : (
                   <>
-                    <EyeOff className="w-3.5 h-3.5" />
+                    <EyeOff className="w-3 h-3" />
                     Отступы: ВЫКЛ
                   </>
                 )}
               </button>
             </div>
-
-            {/* Quick Solstice & Equinox Buttons (Весна, Лето, Осень, Зима) */}
-            <div className="flex flex-wrap items-center gap-1" data-testid="solstice-presets-bar">
-              {SOLSTICE_PRESETS.map((p) => (
-                <button
-                  key={p.day}
-                  type="button"
-                  data-testid={`solstice-preset-${p.id}`}
-                  onClick={() => onChangeDay(p.day)}
-                  className={`px-2 py-1 text-[11px] font-medium rounded border transition-colors whitespace-nowrap ${
-                    Math.abs(dayOfYear - p.day) <= 3
-                      ? 'bg-amber-500/20 border-amber-500/60 text-amber-300 font-semibold'
-                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
           </div>
 
-          {/* Bottom Row: Time of Day & Date Sliders */}
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center pt-1 border-t border-slate-800/80">
-            {/* Play/Pause Animation + Time Slider */}
-            <div className="md:col-span-7 flex items-center gap-2.5">
+          {/* Stacked Sliders Section: 1. Дата года (TOP) -> 2. Время суток (BOTTOM) */}
+          <div className="flex flex-col gap-2 pt-1.5 border-t border-slate-800/80">
+            {/* 1. Day of Year Slider (ABOVE Time of Day) */}
+            <div data-testid="day-of-year-row" className="space-y-1">
+              <div className="flex flex-wrap items-center justify-between gap-1 text-[11px]">
+                <span className="text-slate-300 font-medium flex items-center gap-1 whitespace-nowrap">
+                  <Layers className="w-3 h-3 text-sky-400 shrink-0" />
+                  Дата года
+                </span>
+
+                {/* Quick Solstice & Equinox Buttons */}
+                <div className="flex flex-wrap items-center gap-1" data-testid="solstice-presets-bar">
+                  {SOLSTICE_PRESETS.map((p) => (
+                    <button
+                      key={p.day}
+                      type="button"
+                      data-testid={`solstice-preset-${p.id}`}
+                      onClick={() => onChangeDay(p.day)}
+                      className={`px-1.5 py-0.5 text-[10px] font-medium rounded border transition-colors whitespace-nowrap ${
+                        Math.abs(dayOfYear - p.day) <= 3
+                          ? 'bg-amber-500/20 border-amber-500/60 text-amber-300 font-semibold'
+                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+
+                <span className="font-mono font-semibold text-sky-400 whitespace-nowrap">
+                  {formatDateFromDay(dayOfYear)} (день {dayOfYear})
+                </span>
+              </div>
+              <input
+                type="range"
+                aria-label="День года"
+                data-testid="day-of-year-slider"
+                min={1}
+                max={365}
+                step={1}
+                value={dayOfYear}
+                onChange={(e) => onChangeDay(Number(e.target.value))}
+                className="w-full accent-sky-400 cursor-pointer"
+              />
+            </div>
+
+            {/* 2. Time of Day Slider (BELOW Day of Year) */}
+            <div data-testid="hour-of-day-row" className="flex items-center gap-2.5">
               <button
                 type="button"
                 data-testid="sun-play-btn"
@@ -237,48 +268,26 @@ export const SunTimelineBar: React.FC<SunTimelineBarProps> = ({
 
               <div className="flex-1 space-y-0.5">
                 <div className="flex justify-between text-[11px]">
-                  <span className="text-slate-400 flex items-center gap-1">
-                    <Sun className="w-3 h-3 text-amber-400" />
+                  <span className="text-slate-300 font-medium flex items-center gap-1">
+                    <Sun className="w-3 h-3 text-amber-400 shrink-0" />
                     Время суток (инсоляция, тени и световое пятно в доме)
                   </span>
-                  <span className="font-mono font-semibold text-amber-400">
+                  <span className="font-mono font-semibold text-amber-400 whitespace-nowrap">
                     {formatTime(hourOfDay)}
                   </span>
                 </div>
                 <input
                   type="range"
                   aria-label="Время суток"
+                  data-testid="hour-of-day-slider"
                   min={4}
                   max={22}
                   step={0.25}
                   value={hourOfDay}
                   onChange={(e) => onChangeHour(Number(e.target.value))}
-                  className="w-full accent-amber-400"
+                  className="w-full accent-amber-400 cursor-pointer"
                 />
               </div>
-            </div>
-
-            {/* Day of Year Slider */}
-            <div className="md:col-span-5 space-y-0.5">
-              <div className="flex justify-between text-[11px]">
-                <span className="text-slate-400 flex items-center gap-1">
-                  <Layers className="w-3 h-3 text-sky-400" />
-                  Дата года
-                </span>
-                <span className="font-mono font-semibold text-sky-400">
-                  {formatDateFromDay(dayOfYear)} (день {dayOfYear})
-                </span>
-              </div>
-              <input
-                type="range"
-                aria-label="День года"
-                min={1}
-                max={365}
-                step={1}
-                value={dayOfYear}
-                onChange={(e) => onChangeDay(Number(e.target.value))}
-                className="w-full accent-sky-400"
-              />
             </div>
           </div>
         </div>

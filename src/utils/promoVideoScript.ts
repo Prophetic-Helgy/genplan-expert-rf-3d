@@ -1,4 +1,4 @@
-import { PlotConfig, SiteObject } from '../types';
+import { PlotConfig, SiteObject, RoofType } from '../types';
 import {
   calculateBuildingInteriorArea,
   calculateEnergyAndHeating,
@@ -6,7 +6,8 @@ import {
   calculateSnowLoad,
   calculateFoundationBearing,
   calculateBillOfMaterials,
-  getEffectivePlotRegion
+  getEffectivePlotRegion,
+  calculateWindRoseAndLoads
 } from './calculations';
 
 export interface PromoSceneStateAction {
@@ -19,6 +20,19 @@ export interface PromoSceneStateAction {
   hourOfDay: number;
   selectedObjectCategory?: SiteObject['category'];
   showDrainageZones?: boolean;
+  /** Live interactive demo overrides for object placement/dragging & editing dimensions/floors/roof/windows */
+  demoHousePatch?: {
+    x?: number;
+    z?: number;
+    width?: number;
+    length?: number;
+    floors?: number;
+    hasBasement?: boolean;
+    roofType?: RoofType;
+    southWindows?: number;
+    eastWindows?: number;
+    windowOffset?: number;
+  };
 }
 
 export interface PromoSceneMetricPill {
@@ -47,6 +61,8 @@ export interface PromoVideoScene {
   /** Визуальный акцент сцены для отрисовки инфографики на холсте */
   visualFocus:
     | 'site_3d_precision'
+    | 'drag_and_drop_placement'
+    | 'edit_dimensions_floors_roof_windows'
     | 'normative_setbacks_2d'
     | 'sun_insolation_xray'
     | 'roof_snow_foundation'
@@ -102,7 +118,7 @@ export const PROMO_VIDEO_RESOLUTIONS: Record<PromoVideoResolutionId, PromoVideoR
   }
 };
 
-export const PROMO_VIDEO_TOTAL_DURATION_SEC = 64;
+export const PROMO_VIDEO_TOTAL_DURATION_SEC = 80;
 
 export const PROMO_VIDEO_SCENES: PromoVideoScene[] = [
   {
@@ -113,7 +129,7 @@ export const PROMO_VIDEO_SCENES: PromoVideoScene[] = [
     endSec: 8,
     kicker: 'СЦЕНА 01 · ЦИФРОВОЙ ДВОЙНИК УЧАСТКА И ТОЧНОСТЬ 1 ММ',
     headline: 'Проектирование участка в 3D и 2D по реальным координатам РФ',
-    subheadline: 'Автоматическое определение климатического района, границ соседей и площади застройки',
+    subheadline: 'Автоматическое определение климатического района, розы ветров, границ соседей и площади застройки',
     whatHappensOnScreen:
       'В рабочей области строится точная 3D-модель основного участка, смежных соседских участков и земель госфонда. Все габариты и привязки задаются с точностью до 1 мм (через точку или запятую), а регион РФ определяется по GPS-координатам.',
     whyItIsDone:
@@ -133,12 +149,66 @@ export const PROMO_VIDEO_SCENES: PromoVideoScene[] = [
     visualFocus: 'site_3d_precision'
   },
   {
-    id: 'scene-02-normative-setbacks',
+    id: 'scene-02-drag-and-drop',
     index: 2,
     startSec: 8,
     durationSec: 8,
     endSec: 16,
-    kicker: 'СЦЕНА 02 · АВТОМАТИЧЕСКИЙ АУДИТ ОТСТУПОВ И ПОЖАРНЫХ РАЗРЫВОВ',
+    kicker: 'СЦЕНА 02 · РАЗМЕЩЕНИЕ И ПЕРЕТАСКИВАНИЕ ОБЪЕКТОВ ПО УЧАСТКУ',
+    headline: 'Свободное перемещение построек мышью с живым контролем дистанций',
+    subheadline: 'Добавление дома, бани, гаража, скважины и септика на генплан и перетаскивание в 2D/3D',
+    whatHappensOnScreen:
+      'Пользователь размещает объекты из каталога и перетаскивает жилой дом, баню и скважину по участку курсором мыши. Во время движения в реальном времени пересчитываются расстояния до границ участка, улицы, соседского дома и санитарных зон.',
+    whyItIsDone:
+      'Позволяет за секунды найти идеальное место для каждой постройки на участке без ручных чертежей, мгновенно видя зеленые разрешенные зоны и избегая пересечения охранных и противопожарных буферов.',
+    normativeCode: 'СП 53.13330.2019 · Интерактивный Drag & Drop в 2D/3D',
+    appAction: {
+      viewMode: '3d',
+      showForbiddenZones: true,
+      xrayWallsMode: false,
+      undergroundViewMode: false,
+      thermalHeatmapMode: false,
+      dayOfYear: 172,
+      hourOfDay: 13.8,
+      selectedObjectCategory: 'house',
+      showDrainageZones: false
+    },
+    visualFocus: 'drag_and_drop_placement'
+  },
+  {
+    id: 'scene-03-edit-dimensions-floors-roof-windows',
+    index: 3,
+    startSec: 16,
+    durationSec: 8,
+    endSec: 24,
+    kicker: 'СЦЕНА 03 · РЕДАКТИРОВАНИЕ ГАБАРИТОВ, ЭТАЖНОСТИ, КРЫШИ И ОКОН',
+    headline: 'Настройка размеров дома, 1–3 этажей + подвала, формы крыши и окон',
+    subheadline: 'Мгновенная перестройка 3D-архитектуры: габариты W×L, типы кровли и размещение окон по фасадам',
+    whatHappensOnScreen:
+      'В инспекторе динамически меняются ширина и длина дома, переключается этажность (1, 2, 3 этажа + подземный этаж), форма крыши (плоская, односкатная, двускатная, вальмовая), а также количество, размер и смещение окон и дверей по каждому фасаду.',
+    whyItIsDone:
+      'Дает полный архитектурный контроль над проектом дома: вы сразу видите чистую площадь внутри стен по всем этажам, высоту конька, внешний вид фасадов и точное расположение каждого оконного и дверного проема.',
+    normativeCode: 'СП 55.13330.2016 · 1–3 этажа + Подвал · 4 формы крыши',
+    appAction: {
+      viewMode: '3d',
+      showForbiddenZones: false,
+      xrayWallsMode: false,
+      undergroundViewMode: false,
+      thermalHeatmapMode: false,
+      dayOfYear: 172,
+      hourOfDay: 14.2,
+      selectedObjectCategory: 'house',
+      showDrainageZones: false
+    },
+    visualFocus: 'edit_dimensions_floors_roof_windows'
+  },
+  {
+    id: 'scene-04-normative-setbacks',
+    index: 4,
+    startSec: 24,
+    durationSec: 8,
+    endSec: 32,
+    kicker: 'СЦЕНА 04 · АВТОМАТИЧЕСКИЙ АУДИТ ОТСТУПОВ И ПОЖАРНЫХ РАЗРЫВОВ',
     headline: 'Мгновенная проверка СП 53.13330.2019 и «ловушки свеса крыши»',
     subheadline: 'Красные зоны отступов внутри и за пределами участка + противопожарные радиусы 6–15 м',
     whatHappensOnScreen:
@@ -160,12 +230,12 @@ export const PROMO_VIDEO_SCENES: PromoVideoScene[] = [
     visualFocus: 'normative_setbacks_2d'
   },
   {
-    id: 'scene-03-sun-insolation',
-    index: 3,
-    startSec: 16,
+    id: 'scene-05-sun-insolation',
+    index: 5,
+    startSec: 32,
     durationSec: 8,
-    endSec: 24,
-    kicker: 'СЦЕНА 03 · ХОД СОЛНЦА, СВЕТОВОЕ ПЯТНО В ДОМЕ И САНПИН',
+    endSec: 40,
+    kicker: 'СЦЕНА 05 · ХОД СОЛНЦА, СВЕТОВОЕ ПЯТНО В ДОМЕ И САНПИН',
     headline: 'Рентген стен и траектория солнечных лучей сквозь окна и двери',
     subheadline: 'Автоматический расчет непрерывной инсоляции фасадов по СанПиН 1.2.3685-21',
     whatHappensOnScreen:
@@ -187,19 +257,19 @@ export const PROMO_VIDEO_SCENES: PromoVideoScene[] = [
     visualFocus: 'sun_insolation_xray'
   },
   {
-    id: 'scene-04-roof-snow-foundation',
-    index: 4,
-    startSec: 24,
+    id: 'scene-06-roof-snow-wind-foundation',
+    index: 6,
+    startSec: 40,
     durationSec: 8,
-    endSec: 32,
-    kicker: 'СЦЕНА 04 · КОНСТРУКТИВ ЗДАНИЯ (1–3 ЭТАЖА + ПОДВАЛ) И НАГРУЗКИ',
-    headline: 'Геометрия 4 видов крыш, угол ската α°, снеговая нагрузка и грунт',
-    subheadline: 'Связанный расчет высоты конька, массы снега (СП 20.13330) и давления подошвы на грунт',
+    endSec: 48,
+    kicker: 'СЦЕНА 06 · РОЗА ВЕТРОВ, СНЕГОВАЯ И ВЕТРОВАЯ НАГРУЗКА НА ДОМ И ЗАБОРЫ',
+    headline: 'Региональная роза ветров, парусность заборов, снег и фундамент',
+    subheadline: 'Расчет ветрового давления w₀, изгибающего момента на столбы забора, массы снега и грунта',
     whatHappensOnScreen:
-      'Конфигурируется этажность дома (до 3 надземных этажей + 1 подземный), толщина перекрытий, цоколь и выступ плиты фундамента. Изменение угла наклона ската крыши α° синхронно меняет 3D-модель, коэффициент формы μ и полную снеговую нагрузку.',
+      'По региону РФ строится 8-румбовая роза ветров, вычисляется ветровая нагрузка на фасады и кровлю дома, парусность глухих и сетчатых заборов (момент на столб в кН·м), а также снеговая нагрузка от угла ската крыши α° и давление фундамента на грунт.',
     whyItIsDone:
-      'Предотвращает прогиб стропильной системы зимой и просадку фундамента на суглинках, глинах или торфяниках за счет точного сопоставления полного веса дома со снегом и расчетного сопротивления грунта R0.',
-    normativeCode: 'СП 20.13330.2016 · СП 22.13330.2016',
+      'Предотвращает крен и вырывание столбов забора штормовым ветром, отрыв свесов кровли, прогиб стропильной системы зимой и просадку фундамента на пучинистых суглинках или торфяниках.',
+    normativeCode: 'СП 20.13330.2016 Раздел 10 и 11 · СП 22.13330.2016',
     appAction: {
       viewMode: '3d',
       showForbiddenZones: true,
@@ -214,12 +284,12 @@ export const PROMO_VIDEO_SCENES: PromoVideoScene[] = [
     visualFocus: 'roof_snow_foundation'
   },
   {
-    id: 'scene-05-thermal-heatmap',
-    index: 5,
-    startSec: 32,
+    id: 'scene-07-thermal-heatmap',
+    index: 7,
+    startSec: 48,
     durationSec: 8,
-    endSec: 40,
-    kicker: 'СЦЕНА 05 · 3D ТЕПЛОВИЗОР ФАСАДОВ И СТОИМОСТЬ ОТОПЛЕНИЯ',
+    endSec: 56,
+    kicker: 'СЦЕНА 07 · 3D ТЕПЛОВИЗОР ФАСАДОВ И СТОИМОСТЬ ОТОПЛЕНИЯ',
     headline: 'Тепловая карта потерь энергии, выбор стеклопакетов и утепления',
     subheadline: 'Честный вычет площади окон из стен и расчет затрат на газ, электричество и дрова',
     whatHappensOnScreen:
@@ -241,18 +311,18 @@ export const PROMO_VIDEO_SCENES: PromoVideoScene[] = [
     visualFocus: 'thermal_heatmap_energy'
   },
   {
-    id: 'scene-06-relief-drainage-utilities',
-    index: 6,
-    startSec: 40,
+    id: 'scene-08-relief-drainage-utilities',
+    index: 8,
+    startSec: 56,
     durationSec: 8,
-    endSec: 48,
-    kicker: 'СЦЕНА 06 · РЕЛЬЕФ УЧАСТКА, ЛИВНЕВЫЙ ДРЕНАЖ И ПОДЗЕМНЫЕ СЕТИ',
-    headline: 'Расчет уклона поверхности и автоматические зоны водоотведения',
-    subheadline: 'Нагорная перехватывающая дрена, колодец-коллектор и трубопроводы ниже промерзания',
+    endSec: 64,
+    kicker: 'СЦЕНА 08 · РЕЛЬЕФ УЧАСТКА, ДРЕНАЖ И ПОДЗЕМНЫЙ 3D-РАЗРЕЗ',
+    headline: 'Подземный этаж дома, трассы водопровода и ливневое водоотведение',
+    subheadline: 'Прозрачный грунт: контроль цокольного этажа и глубины заложения труб ниже промерзания',
     whatHappensOnScreen:
-      'По высотным отметкам 4 углов участка рассчитывается уклон в процентах и промилле, расход ливневого стока Q (л/с) и строятся 3 зоны дренажа. В подземном 3D-режиме видны трассы водопровода, канализации и газа (Ø 32–315 мм) относительно глубины промерзания.',
+      'Включается подземный 3D-режим: поверхность грунта становится полупрозрачной, открывая подземный этаж дома с лестницей и перегородками, а также подземные трассы водопровода, канализации и газа (Ø 32–315 мм) относительно плоскости промерзания грунта.',
     whyItIsDone:
-      'Защищает участок от весеннего затопления и подмыва фундамента талыми водами, а также гарантирует, что водопровод и септик не перемерзнут зимой и соблюдут санитарные зоны до скважины (≥ 8–20 м).',
+      'Защищает участок от весеннего затопления талыми водами и гарантирует, что подземный этаж и магистральный водопровод залегают на безопасной глубине и не перемерзнут зимой.',
     normativeCode: 'СП 42.13330.2016 · СП 32.13330.2018 · СП 31.13330',
     appAction: {
       viewMode: '3d',
@@ -262,18 +332,18 @@ export const PROMO_VIDEO_SCENES: PromoVideoScene[] = [
       thermalHeatmapMode: false,
       dayOfYear: 105,
       hourOfDay: 13.0,
-      selectedObjectCategory: 'well',
+      selectedObjectCategory: 'house',
       showDrainageZones: true
     },
     visualFocus: 'relief_drainage_underground'
   },
   {
-    id: 'scene-07-legal-protection',
-    index: 7,
-    startSec: 48,
+    id: 'scene-09-legal-protection',
+    index: 9,
+    startSec: 64,
     durationSec: 8,
-    endSec: 56,
-    kicker: 'СЦЕНА 07 · ЮРИДИЧЕСКАЯ ЗАЩИТА СОБСТВЕННИКА ПО ЗАКОНАМ РФ',
+    endSec: 72,
+    kicker: 'СЦЕНА 09 · ЮРИДИЧЕСКАЯ ЗАЩИТА СОБСТВЕННИКА ПО ЗАКОНАМ РФ',
     headline: 'Генератор досудебной претензии соседу и бланка согласия на забор',
     subheadline: 'Автоматический документ со ссылками на ст. 304 ГК РФ и точными замерами нарушений',
     whatHappensOnScreen:
@@ -282,7 +352,7 @@ export const PROMO_VIDEO_SCENES: PromoVideoScene[] = [
       'Экономит десятки тысяч рублей на юристах и землеустроительных экспертизах: вы сразу получаете аргументированный правовой документ для мирного урегулирования спора или обращения в суд.',
     normativeCode: 'ст. 304 ГК РФ · ст. 222 ГК РФ · СП 53.13330.2019',
     appAction: {
-      viewMode: '2d',
+      viewMode: '3d',
       showForbiddenZones: true,
       xrayWallsMode: false,
       undergroundViewMode: false,
@@ -295,12 +365,12 @@ export const PROMO_VIDEO_SCENES: PromoVideoScene[] = [
     visualFocus: 'legal_claim_defense'
   },
   {
-    id: 'scene-08-bom-pdf-mcp',
-    index: 8,
-    startSec: 56,
+    id: 'scene-10-bom-pdf-mcp',
+    index: 10,
+    startSec: 72,
     durationSec: 8,
-    endSec: 64,
-    kicker: 'СЦЕНА 08 · СМЕТА ПО РЫНОЧНЫМ ЦЕНАМ, ОТЧЕТ PDF И ИИ-ИНТЕГРАЦИЯ MCP',
+    endSec: 80,
+    kicker: 'СЦЕНА 10 · СМЕТА ПО РЫНОЧНЫМ ЦЕНАМ, ОТЧЕТ PDF И ИИ-ИНТЕГРАЦИЯ MCP',
     headline: 'Точная ведомость материалов, полный PDF-отчет и управление через ИИ',
     subheadline: 'Ввод рыночных цен за кубометр/м², экспорт PDF в 1 клик и встроенный MCP-сервер',
     whatHappensOnScreen:
@@ -363,6 +433,7 @@ export function computeLivePromoSceneMetrics(
   const fnd = house ? calculateFoundationBearing(house, region.id, plot.soilTypeId) : null;
   const energy = house ? calculateEnergyAndHeating(house, plot) : null;
   const relief = calculatePlotReliefAndDrainage(plot, objects);
+  const wind = calculateWindRoseAndLoads(plot, objects, house);
   const bom = calculateBillOfMaterials(plot, objects);
 
   switch (scene.visualFocus) {
@@ -382,6 +453,42 @@ export function computeLivePromoSceneMetrics(
           label: 'Точность ввода',
           value: '1 мм (0.001 м)',
           accent: 'indigo'
+        }
+      ];
+    case 'drag_and_drop_placement':
+      return [
+        {
+          label: 'Режим размещения',
+          value: 'Drag & Drop (Мышь / Сетка)',
+          accent: 'sky'
+        },
+        {
+          label: 'Построек на схеме',
+          value: `${objects.length} объектов`,
+          accent: 'emerald'
+        },
+        {
+          label: 'Контроль дистанций',
+          value: 'В реальном времени',
+          accent: 'amber'
+        }
+      ];
+    case 'edit_dimensions_floors_roof_windows':
+      return [
+        {
+          label: 'Габариты и этажи',
+          value: house ? `${house.width}×${house.length} м · ${house.floors || 2} эт. + подвал` : '10×10 м · 2 эт.',
+          accent: 'sky'
+        },
+        {
+          label: 'Форма крыши',
+          value: '4 типа (Плоская/Скатная/Вальма)',
+          accent: 'amber'
+        },
+        {
+          label: 'Окна и двери',
+          value: 'По 4 фасадам + смещение',
+          accent: 'emerald'
         }
       ];
     case 'normative_setbacks_2d':
@@ -423,18 +530,18 @@ export function computeLivePromoSceneMetrics(
     case 'roof_snow_foundation':
       return [
         {
-          label: 'Расчетный снег S0',
-          value: snow ? `${snow.designSnowLoadS} кг/м² (μ=${snow.mu})` : '210 кг/м²',
+          label: `Ветер (${wind.windZone} р-н, ${wind.prevailingWindDir})`,
+          value: `w₀=${wind.windPressureW0KgM2} кг/м² · F=${wind.selectedBuildingWind.totalHorizontalForceKn} кН`,
           accent: 'sky'
         },
         {
-          label: 'Масса дома со снегом',
-          value: fnd ? `${fnd.totalLoadWithSnowTons} т` : '142 т',
+          label: 'Парусность забора',
+          value: `M = ${wind.maxFenceMomentKnm} кН·м на столб`,
           accent: 'amber'
         },
         {
-          label: 'Давление на грунт',
-          value: fnd ? `${fnd.actualPressureKpa} кПа (R0=${fnd.soilBearingR0Kpa})` : '81 кПа',
+          label: 'Снег S0 и грунт R0',
+          value: snow && fnd ? `${snow.designSnowLoadS} кг/м² · ${fnd.actualPressureKpa} кПа` : '210 кг/м² · 81 кПа',
           accent: 'emerald'
         }
       ];
@@ -464,8 +571,8 @@ export function computeLivePromoSceneMetrics(
           accent: 'sky'
         },
         {
-          label: 'Ливневый сток Q',
-          value: `${relief.stormwaterRunoffLitersPerSec} л/с (${relief.slopeDirectionLabel})`,
+          label: 'Подземный этаж и трубы',
+          value: `Подвал −2.4 м · Вода −1.8 м`,
           accent: 'emerald'
         },
         {

@@ -1,6 +1,6 @@
 /**
  * @license
- * Source-Available License — see the LICENSE file in the repository root.
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -517,22 +517,22 @@ export default function App() {
           z: plot.length / 2 + 3
         },
         water_main: {
-          w: 26,
-          l: 1.4,
+          w: 16,
+          l: 1.2,
           hWall: 1.0,
           hRoof: 0,
           roof: 'flat',
-          x: -plot.width / 2 - 4,
-          z: 0
+          x: -1,
+          z: 8.5
         },
         sewer_main: {
-          w: 26,
-          l: 1.4,
+          w: 14,
+          l: 1.2,
           hWall: 1.0,
           hRoof: 0,
           roof: 'flat',
-          x: plot.width / 2 + 4,
-          z: 6
+          x: 2,
+          z: 11.5
         },
         road: { w: 34, l: 6.0, hWall: 0.2, hRoof: 0, roof: 'flat', x: 0, z: plot.length / 2 + 4.5 }
       };
@@ -646,36 +646,66 @@ export default function App() {
     setThermalHeatmapMode((prev) => (typeof forceValue === 'boolean' ? forceValue : !prev));
   };
 
-  const handleApplyPromoSceneState = useCallback(
-    (action: PromoSceneStateAction) => {
-      setViewMode(action.viewMode);
-      setShowForbiddenZones(action.showForbiddenZones);
-      setXrayWallsMode(action.xrayWallsMode);
-      setUndergroundViewMode(action.undergroundViewMode);
-      setThermalHeatmapMode(action.thermalHeatmapMode);
-      setDayOfYear(action.dayOfYear);
-      setHourOfDay(action.hourOfDay);
+  const handleApplyPromoSceneState = useCallback((action: PromoSceneStateAction) => {
+    setViewMode(action.viewMode);
+    setShowForbiddenZones(action.showForbiddenZones);
+    setXrayWallsMode(action.xrayWallsMode);
+    setUndergroundViewMode(action.undergroundViewMode);
+    setThermalHeatmapMode(action.thermalHeatmapMode);
+    setDayOfYear(action.dayOfYear);
+    setHourOfDay(action.hourOfDay);
+    setObjects((prev) => {
       if (action.selectedObjectCategory) {
-        const target = objects.find((o) => o.category === action.selectedObjectCategory);
+        const target = prev.find((o) => o.category === action.selectedObjectCategory);
         if (target) {
           setSelectedObjectId(target.id);
         }
       }
-      if (typeof action.showDrainageZones === 'boolean') {
-        setPlot((prev) => ({
-          ...prev,
-          relief: {
-            elevationNW: prev.relief?.elevationNW ?? 145.6,
-            elevationNE: prev.relief?.elevationNE ?? 145.2,
-            elevationSW: prev.relief?.elevationSW ?? 144.8,
-            elevationSE: prev.relief?.elevationSE ?? 144.4,
-            showDrainageZones: action.showDrainageZones!
+      if (!action.demoHousePatch) return prev;
+      const patch = action.demoHousePatch;
+      return prev.map((obj) => {
+        if (obj.category !== 'house') return obj;
+        const nextFloors = patch.floors ?? obj.floors ?? 2;
+        const floorH = obj.floorHeight ?? 2.8;
+        const prevWin = obj.windows || {
+          north: 1,
+          south: 2,
+          east: 2,
+          west: 1
+        };
+        return {
+          ...obj,
+          x: patch.x !== undefined ? patch.x : obj.x,
+          z: patch.z !== undefined ? patch.z : obj.z,
+          width: patch.width !== undefined ? patch.width : obj.width,
+          length: patch.length !== undefined ? patch.length : obj.length,
+          floors: nextFloors,
+          wallHeight: Number((nextFloors * floorH).toFixed(2)),
+          hasBasement: patch.hasBasement !== undefined ? patch.hasBasement : obj.hasBasement,
+          roofType: patch.roofType !== undefined ? patch.roofType : obj.roofType,
+          windows: {
+            ...prevWin,
+            south: patch.southWindows !== undefined ? patch.southWindows : prevWin.south,
+            east: patch.eastWindows !== undefined ? patch.eastWindows : prevWin.east,
+            positionOffset:
+              patch.windowOffset !== undefined ? patch.windowOffset : prevWin.positionOffset
           }
-        }));
-      }
-    },
-    [objects]
-  );
+        };
+      });
+    });
+    if (typeof action.showDrainageZones === 'boolean') {
+      setPlot((prev) => ({
+        ...prev,
+        relief: {
+          elevationNW: prev.relief?.elevationNW ?? 145.6,
+          elevationNE: prev.relief?.elevationNE ?? 145.2,
+          elevationSW: prev.relief?.elevationSW ?? 144.8,
+          elevationSE: prev.relief?.elevationSE ?? 144.4,
+          showDrainageZones: action.showDrainageZones!
+        }
+      }));
+    }
+  }, []);
 
   // Execute MCP JSON-RPC 2.0 request against server AND synchronize local React state
   const handleExecuteMcpRpc = useCallback(
@@ -966,6 +996,7 @@ export default function App() {
           </a>
           <a
             href="#save-project"
+            data-testid="header-save-export-link"
             onClick={(e) => {
               e.preventDefault();
               handleSaveProjectNow();
@@ -973,7 +1004,7 @@ export default function App() {
             }}
             className="hover:text-white transition-colors whitespace-nowrap shrink-0"
           >
-            Сохранить и Экспорт
+            Сохранение и Экспорт
           </a>
         </nav>
 

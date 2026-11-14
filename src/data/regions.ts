@@ -17,11 +17,19 @@ export const REGIONS_RF: RegionInfo[] = [
     lng: 37.6173,
     snowZone: 3,
     snowLoadSg: 150,
+    windZone: 'I',
+    windPressureW0Pa: 230,
+    windPressureW0KgM2: 23,
+    avgWindSpeedMs: 3.8,
+    maxGustWindSpeedMs: 19,
+    prevailingWindDir: 'SW',
+    prevailingWindLabel: 'ЮЗ (Юго-Западный)',
+    windRose: { N: 9, NE: 8, E: 9, SE: 12, S: 15, SW: 21, W: 16, NW: 10 },
     frostDepth: 1.4,
     gsop: 4550,
     rReqWall: 3.13,
     defaultSoil: 'loam',
-    climateSummary: 'Умеренно-континентальный климат, III снеговой район, преобладают пучинистые суглинки.'
+    climateSummary: 'Умеренно-континентальный климат, III снеговой и I ветровой район (w₀ = 23 кг/м²), преобладают ЮЗ ветра.'
   },
   {
     id: 'spb',
@@ -30,11 +38,19 @@ export const REGIONS_RF: RegionInfo[] = [
     lng: 30.3351,
     snowZone: 4,
     snowLoadSg: 200,
+    windZone: 'II',
+    windPressureW0Pa: 300,
+    windPressureW0KgM2: 30,
+    avgWindSpeedMs: 4.6,
+    maxGustWindSpeedMs: 23,
+    prevailingWindDir: 'W',
+    prevailingWindLabel: 'З / ЮЗ (Западный с Финского залива)',
+    windRose: { N: 8, NE: 9, E: 10, SE: 11, S: 13, SW: 20, W: 21, NW: 8 },
     frostDepth: 1.45,
     gsop: 4790,
     rReqWall: 3.23,
     defaultSoil: 'peat',
-    climateSummary: 'Влажный морской климат, IV снеговой район, высокий УГВ, часто встречаются торфяники и плывуны.'
+    climateSummary: 'Влажный морской климат, IV снеговой и II ветровой район (w₀ = 30 кг/м²), балтийские западные ветра.'
   },
   {
     id: 'krasnodar',
@@ -43,11 +59,19 @@ export const REGIONS_RF: RegionInfo[] = [
     lng: 38.9753,
     snowZone: 2,
     snowLoadSg: 100,
+    windZone: 'IV',
+    windPressureW0Pa: 480,
+    windPressureW0KgM2: 48,
+    avgWindSpeedMs: 5.4,
+    maxGustWindSpeedMs: 28,
+    prevailingWindDir: 'E',
+    prevailingWindLabel: 'В / СВ (Восточный степной / норд-ост)',
+    windRose: { N: 8, NE: 21, E: 25, SE: 10, S: 8, SW: 11, W: 10, NW: 7 },
     frostDepth: 0.8,
     gsop: 2690,
     rReqWall: 2.34,
     defaultSoil: 'loam',
-    climateSummary: 'Южный мягкий климат, II снеговой район, минимальное промерзание, жаркое лето (высокая инсоляция).'
+    climateSummary: 'Южный климат, II снеговой и IV ветровой район (w₀ = 48 кг/м² — сильные восточные и СВ ветра).'
   },
   {
     id: 'astrakhan',
@@ -56,11 +80,19 @@ export const REGIONS_RF: RegionInfo[] = [
     lng: 48.0408,
     snowZone: 1,
     snowLoadSg: 50,
+    windZone: 'IV',
+    windPressureW0Pa: 480,
+    windPressureW0KgM2: 48,
+    avgWindSpeedMs: 5.8,
+    maxGustWindSpeedMs: 29,
+    prevailingWindDir: 'SE',
+    prevailingWindLabel: 'ЮВ / В (Юго-Восточный каспийский суховей)',
+    windRose: { N: 7, NE: 12, E: 22, SE: 24, S: 9, SW: 8, W: 10, NW: 8 },
     frostDepth: 0.9,
     gsop: 3100,
     rReqWall: 2.48,
     defaultSoil: 'sand',
-    climateSummary: 'Резко континентальный засушливый климат, I снеговой район, супесчаные и песчаные грунты.'
+    climateSummary: 'Засушливый степной климат, I снеговой и IV ветровой район (w₀ = 48 кг/м²), сильные ЮВ ветра.'
   },
   {
     id: 'kazan',
@@ -69,11 +101,19 @@ export const REGIONS_RF: RegionInfo[] = [
     lng: 49.1064,
     snowZone: 5,
     snowLoadSg: 250,
+    windZone: 'II',
+    windPressureW0Pa: 300,
+    windPressureW0KgM2: 30,
+    avgWindSpeedMs: 4.4,
+    maxGustWindSpeedMs: 22,
+    prevailingWindDir: 'S',
+    prevailingWindLabel: 'Ю / ЮЗ (Южный волжский)',
+    windRose: { N: 10, NE: 7, E: 8, SE: 12, S: 22, SW: 19, W: 13, NW: 9 },
     frostDepth: 1.7,
     gsop: 5300,
     rReqWall: 3.42,
     defaultSoil: 'loam',
-    climateSummary: 'Поволжье, V снеговой район (высокая снеговая нагрузка), плотные суглинки и глины.'
+    climateSummary: 'Поволжье, V снеговой и II ветровой район (w₀ = 30 кг/м²), преобладают южные и ЮЗ ветра.'
   },
   {
     id: 'ekaterinburg',
@@ -82,11 +122,19 @@ export const REGIONS_RF: RegionInfo[] = [
     lng: 60.6057,
     snowZone: 4,
     snowLoadSg: 200,
+    windZone: 'II',
+    windPressureW0Pa: 300,
+    windPressureW0KgM2: 30,
+    avgWindSpeedMs: 4.3,
+    maxGustWindSpeedMs: 21,
+    prevailingWindDir: 'W',
+    prevailingWindLabel: 'З (Западный уральский перенос)',
+    windRose: { N: 8, NE: 6, E: 7, SE: 10, S: 13, SW: 18, W: 24, NW: 14 },
     frostDepth: 1.9,
     gsop: 5980,
     rReqWall: 3.64,
     defaultSoil: 'rock',
-    climateSummary: 'Урал, IV снеговой район, глубокое промерзание до 1.9 м, скальные и крупнообломочные грунты.'
+    climateSummary: 'Урал, IV снеговой и II ветровой район (w₀ = 30 кг/м²), выраженный западный ветровой перенос.'
   },
   {
     id: 'novosibirsk',
@@ -95,11 +143,19 @@ export const REGIONS_RF: RegionInfo[] = [
     lng: 82.9357,
     snowZone: 4,
     snowLoadSg: 200,
+    windZone: 'III',
+    windPressureW0Pa: 380,
+    windPressureW0KgM2: 38,
+    avgWindSpeedMs: 4.9,
+    maxGustWindSpeedMs: 25,
+    prevailingWindDir: 'SW',
+    prevailingWindLabel: 'ЮЗ (Юго-Западный сибирский)',
+    windRose: { N: 9, NE: 7, E: 8, SE: 10, S: 17, SW: 25, W: 15, NW: 9 },
     frostDepth: 2.2,
     gsop: 6600,
     rReqWall: 3.85,
     defaultSoil: 'loam',
-    climateSummary: 'Сибирь, суровые зимы, промерзание 2.2 м, требуется усиленная теплозащита стен.'
+    climateSummary: 'Западная Сибирь, IV снеговой и III ветровой район (w₀ = 38 кг/м²), зимние ЮЗ метели.'
   },
   {
     id: 'perm',
@@ -108,11 +164,19 @@ export const REGIONS_RF: RegionInfo[] = [
     lng: 56.2502,
     snowZone: 6,
     snowLoadSg: 300,
+    windZone: 'II',
+    windPressureW0Pa: 300,
+    windPressureW0KgM2: 30,
+    avgWindSpeedMs: 4.2,
+    maxGustWindSpeedMs: 21,
+    prevailingWindDir: 'SW',
+    prevailingWindLabel: 'ЮЗ / Ю (Юго-Западный предуральский)',
+    windRose: { N: 10, NE: 7, E: 8, SE: 11, S: 18, SW: 21, W: 15, NW: 10 },
     frostDepth: 2.0,
     gsop: 6150,
     rReqWall: 3.70,
     defaultSoil: 'loam',
-    climateSummary: 'Предуралье, VI снеговой район (экстремальный вес снега 300 кг/м² норматива).'
+    climateSummary: 'Предуралье, VI снеговой (300 кг/м²) и II ветровой район (w₀ = 30 кг/м²).'
   },
   {
     id: 'murmansk',
@@ -121,11 +185,19 @@ export const REGIONS_RF: RegionInfo[] = [
     lng: 33.0827,
     snowZone: 7,
     snowLoadSg: 350,
+    windZone: 'VI',
+    windPressureW0Pa: 730,
+    windPressureW0KgM2: 73,
+    avgWindSpeedMs: 6.8,
+    maxGustWindSpeedMs: 34,
+    prevailingWindDir: 'S',
+    prevailingWindLabel: 'Ю / ЮЗ (Южный мурманский / штормовой)',
+    windRose: { N: 14, NE: 9, E: 6, SE: 8, S: 24, SW: 20, W: 10, NW: 9 },
     frostDepth: 2.3,
     gsop: 6800,
     rReqWall: 3.95,
     defaultSoil: 'rock',
-    climateSummary: 'Крайний Север, VII снеговой район, полярная ночь/день, ветровые и снеговые перегрузки.'
+    climateSummary: 'Крайний Север, VII снеговой и VI ветровой район (w₀ = 73 кг/м² — штормовые нагрузки).'
   },
   {
     id: 'norilsk',
@@ -134,11 +206,19 @@ export const REGIONS_RF: RegionInfo[] = [
     lng: 88.1893,
     snowZone: 8,
     snowLoadSg: 400,
+    windZone: 'VII',
+    windPressureW0Pa: 850,
+    windPressureW0KgM2: 85,
+    avgWindSpeedMs: 7.5,
+    maxGustWindSpeedMs: 38,
+    prevailingWindDir: 'S',
+    prevailingWindLabel: 'Ю / ЮВ (Арктическая черная пурга)',
+    windRose: { N: 11, NE: 8, E: 12, SE: 19, S: 23, SW: 13, W: 7, NW: 7 },
     frostDepth: 2.8,
     gsop: 8400,
     rReqWall: 4.50,
     defaultSoil: 'rock',
-    climateSummary: 'VIII снеговой район (максимальный в РФ — 400 кг/м² норматива, 560 кг/м² расчетный).'
+    climateSummary: 'VIII снеговой (400 кг/м²) и VII ветровой район (w₀ = 85 кг/м² — экстремальный ветер и снег).'
   }
 ];
 

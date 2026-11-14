@@ -17,7 +17,8 @@ import {
   Flame,
   Layers,
   Zap,
-  DoorOpen
+  DoorOpen,
+  Wind
 } from 'lucide-react';
 import {
   PlotConfig,
@@ -60,7 +61,8 @@ import {
   getDefaultBurialDepth,
   getDefaultPipelineDiameterMm,
   getObjectCategoryCapabilities,
-  calculatePlotReliefAndDrainage
+  calculatePlotReliefAndDrainage,
+  calculateWindRoseAndLoads
 } from '../utils/calculations';
 import { downloadUrbanPlanningPdfReport } from '../utils/pdfReportGenerator';
 import {
@@ -194,6 +196,7 @@ export const RightInspector: React.FC<RightInspectorProps> = ({
 
   const selectedCaps = selectedObj ? getObjectCategoryCapabilities(selectedObj.category) : null;
   const reliefAnalysis = calculatePlotReliefAndDrainage(plot, objects);
+  const windAnalysis = calculateWindRoseAndLoads(plot, objects, selectedObj);
   const activeUtilityObj =
     selectedObj && isUndergroundCapableCategory(selectedObj.category) ? selectedObj : null;
 
@@ -1296,7 +1299,7 @@ export const RightInspector: React.FC<RightInspectorProps> = ({
                     />
 
                     {/* Quick Normative Angle Presets (СП 20.13330.2016) */}
-                    <div className="grid grid-cols-4 gap-1">
+                    <div className="grid grid-cols-2 gap-1.5">
                       {[
                         { deg: 15, label: '15° (Пологая)' },
                         { deg: 30, label: '30° (μ=1.0)' },
@@ -1313,7 +1316,7 @@ export const RightInspector: React.FC<RightInspectorProps> = ({
                               roofHeight: calculateRoofHeightFromAngle(prev, preset.deg)
                             }))
                           }
-                          className={`py-1 px-1 text-[10px] font-mono rounded border transition-colors whitespace-nowrap ${
+                          className={`py-1.5 px-2 text-xs font-mono rounded border transition-colors text-center ${
                             Math.abs(roofMetrics.slopeAngleDeg - preset.deg) < 0.8
                               ? 'bg-sky-600 text-white border-sky-400 font-semibold'
                               : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-slate-700'
@@ -2629,6 +2632,225 @@ export const RightInspector: React.FC<RightInspectorProps> = ({
                       </button>
                     );
                   })}
+                </div>
+              </div>
+            </section>
+
+            {/* 6. Regional Wind Rose, Wind Speed & Wind Load on Buildings and Fences (СП 20.13330.2016 Раздел 11) */}
+            <section
+              data-testid="engineering-wind-rose-loads-section"
+              className="p-3 rounded-lg bg-slate-950 border border-sky-500/40 space-y-3"
+            >
+              <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-2">
+                <div>
+                  <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <Wind className="w-4 h-4 text-sky-400" />
+                    6. Роза ветров и ветровые нагрузки (СП 20.13330)
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Регион: {windAnalysis.regionName} ({windAnalysis.windZone} ветровой район)
+                  </p>
+                </div>
+                <span
+                  data-testid="engineering-wind-zone-badge"
+                  className="px-2 py-0.5 rounded bg-sky-950/90 border border-sky-500/50 text-[11px] font-mono font-bold text-sky-300 whitespace-nowrap"
+                >
+                  w₀ = {windAnalysis.windPressureW0KgM2} кг/м²
+                </span>
+              </div>
+
+              {/* Wind Rose 8-Direction SVG Diagram + Key Wind Speed Metrics */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 items-center bg-slate-900/90 p-2.5 rounded-lg border border-slate-800">
+                <div className="flex flex-col items-center">
+                  {(() => {
+                    const polyPts = windAnalysis.sectors
+                      .map((s) => {
+                        const rad = ((s.plotAngleDeg - 90) * Math.PI) / 180;
+                        const r = 10 + (s.frequencyPercent / 28) * 34;
+                        const x = (55 + Math.cos(rad) * r).toFixed(1);
+                        const y = (55 + Math.sin(rad) * r).toFixed(1);
+                        return `${x},${y}`;
+                      })
+                      .join(' ');
+                    return (
+                      <svg
+                        className="w-28 h-28"
+                        viewBox="0 0 110 110"
+                        data-testid="inspector-wind-rose-svg"
+                      >
+                        <circle cx="55" cy="55" r="42" fill="none" stroke="#334155" strokeWidth="1" strokeDasharray="3 3" />
+                        <circle cx="55" cy="55" r="24" fill="none" stroke="#1e293b" strokeWidth="1" />
+                        <line x1="55" y1="8" x2="55" y2="102" stroke="#1e293b" strokeWidth="1" />
+                        <line x1="8" y1="55" x2="102" y2="55" stroke="#1e293b" strokeWidth="1" />
+                        <polygon
+                          points={polyPts}
+                          fill="rgba(56, 189, 248, 0.28)"
+                          stroke="#38bdf8"
+                          strokeWidth="2"
+                        />
+                        {windAnalysis.sectors.map((s) => {
+                          const rad = ((s.plotAngleDeg - 90) * Math.PI) / 180;
+                          const labelR = 48;
+                          const lx = 55 + Math.cos(rad) * labelR;
+                          const ly = 55 + Math.sin(rad) * labelR + 3;
+                          const dotR = 10 + (s.frequencyPercent / 28) * 34;
+                          const dx = 55 + Math.cos(rad) * dotR;
+                          const dy = 55 + Math.sin(rad) * dotR;
+                          return (
+                            <g key={s.dir}>
+                              <circle
+                                cx={dx}
+                                cy={dy}
+                                r={s.isPrevailing ? 3.5 : 2}
+                                fill={s.isPrevailing ? '#f59e0b' : '#38bdf8'}
+                              />
+                              <text
+                                x={lx}
+                                y={ly}
+                                textAnchor="middle"
+                                className={`text-[8px] font-mono ${
+                                  s.isPrevailing ? 'fill-amber-300 font-bold' : 'fill-slate-400'
+                                }`}
+                              >
+                                {s.shortRu}
+                              </text>
+                            </g>
+                          );
+                        })}
+                      </svg>
+                    );
+                  })()}
+                  <span className="text-[10px] font-mono text-amber-300 text-center">
+                    Господствующий: {windAnalysis.prevailingWindLabel}
+                  </span>
+                </div>
+
+                <div className="space-y-1.5 text-[11px]">
+                  <div className="p-1.5 rounded bg-slate-950 border border-slate-800 flex justify-between">
+                    <span className="text-slate-400">Средняя скорость:</span>
+                    <span className="font-mono font-semibold text-white">
+                      {windAnalysis.avgWindSpeedMs} м/с
+                    </span>
+                  </div>
+                  <div className="p-1.5 rounded bg-slate-950 border border-slate-800 flex justify-between">
+                    <span className="text-slate-400">Порывы (шторм):</span>
+                    <span className="font-mono font-bold text-amber-300">
+                      до {windAnalysis.maxGustWindSpeedMs} м/с
+                    </span>
+                  </div>
+                  <div className="p-1.5 rounded bg-slate-950 border border-slate-800 flex justify-between">
+                    <span className="text-slate-400">Давление w₀ (Па):</span>
+                    <span className="font-mono text-sky-300">
+                      {windAnalysis.windPressureW0Pa} Па ({windAnalysis.windPressureW0KgM2} кг/м²)
+                    </span>
+                  </div>
+                  <div className="p-1.5 rounded bg-slate-950 border border-slate-800 flex justify-between">
+                    <span className="text-slate-400">Расчетное (γ=1.4):</span>
+                    <span className="font-mono font-semibold text-emerald-300">
+                      {windAnalysis.designWindPressureW0KgM2} кг/м²
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* 8-Rumb Frequency Breakdown */}
+              <div className="grid grid-cols-4 gap-1 text-[10px] font-mono">
+                {windAnalysis.sectors.map((s) => (
+                  <div
+                    key={s.dir}
+                    className={`p-1 rounded border text-center ${
+                      s.isPrevailing
+                        ? 'bg-amber-950/60 border-amber-500/60 text-amber-200 font-bold'
+                        : 'bg-slate-900 border-slate-800 text-slate-300'
+                    }`}
+                  >
+                    {s.shortRu}: {s.frequencyPercent}%
+                  </div>
+                ))}
+              </div>
+
+              {/* Wind Load on Selected Building */}
+              <div
+                data-testid="building-wind-load-card"
+                className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 space-y-1.5 text-xs"
+              >
+                <div className="flex items-center justify-between border-b border-slate-800 pb-1">
+                  <span className="font-semibold text-sky-300">
+                    Нагрузка на строение: «{windAnalysis.selectedBuildingWind.objectName}»
+                  </span>
+                  <span className="font-mono text-[11px] text-slate-400">
+                    H = {windAnalysis.selectedBuildingWind.buildingTotalHeightM} м (k={windAnalysis.selectedBuildingWind.heightFactorKze})
+                  </span>
+                </div>
+                <div className="flex justify-between text-[11px]">
+                  <span className="text-slate-400">Наветренное давление на фасад:</span>
+                  <span className="font-mono font-semibold text-white">
+                    {windAnalysis.selectedBuildingWind.windwardPressureKgM2} кг/м²
+                  </span>
+                </div>
+                <div className="flex justify-between text-[11px]">
+                  <span className="text-slate-400">Подветренный отсос / отрыв кровли:</span>
+                  <span className="font-mono text-amber-300">
+                    −{windAnalysis.selectedBuildingWind.leewardSuctionKgM2} / −{windAnalysis.selectedBuildingWind.roofUpliftPressureKgM2} кг/м²
+                  </span>
+                </div>
+                <div className="flex justify-between text-[11px]">
+                  <span className="text-slate-400">Суммарная боковая сила ветра F:</span>
+                  <span
+                    data-testid="building-wind-total-force"
+                    className="font-mono font-bold text-emerald-400"
+                  >
+                    {windAnalysis.selectedBuildingWind.totalHorizontalForceKn} кН ({windAnalysis.selectedBuildingWind.totalHorizontalForceKgf} кгс)
+                  </span>
+                </div>
+                <div className="flex justify-between text-[11px]">
+                  <span className="text-slate-400">Опрокидывающий момент M:</span>
+                  <span className="font-mono text-sky-300">
+                    {windAnalysis.selectedBuildingWind.overturningMomentKnm} кН·м
+                  </span>
+                </div>
+                <p className="text-[10px] text-slate-300 pt-1 border-t border-slate-800 leading-snug">
+                  {windAnalysis.selectedBuildingWind.roofAnchorRecommendation}
+                </p>
+              </div>
+
+              {/* Wind Load on Plot Fences */}
+              <div
+                data-testid="fences-wind-load-table"
+                className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 space-y-2"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-amber-300">
+                    Ветровая нагрузка и парусность заборов (по сторонам):
+                  </span>
+                  <span className="text-[10px] font-mono text-slate-400">шаг столбов 2.5 м</span>
+                </div>
+                <div className="space-y-1.5">
+                  {windAnalysis.fences.map((fw) => (
+                    <div
+                      key={fw.edgeIndex}
+                      className="p-2 rounded bg-slate-950 border border-slate-800 text-[11px] space-y-1"
+                    >
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="font-semibold text-slate-200">
+                          {fw.edgeLabel} ({fw.fenceType === 'solid' ? 'Профлист глухой' : 'Сетка/Штакетник'}, H={fw.fenceHeightM}м)
+                        </span>
+                        <span className="font-mono font-bold text-sky-300 shrink-0">
+                          {fw.designWindPressureKgM2} кг/м²
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between text-[10px] font-mono text-slate-300">
+                        <span>На 1 столб: {fw.forcePerPostKgf} кгс</span>
+                        <span className="text-amber-300 font-semibold">
+                          Момент M = {fw.bendingMomentPerPostKnm} кН·м
+                        </span>
+                        <span>Вся грань: {fw.totalEdgeWindForceKn} кН</span>
+                      </div>
+                      <div className="text-[10px] text-emerald-300 leading-snug">
+                        Столбы: {fw.recommendedPostSpec} · бетонирование ≥ {fw.recommendedEmbedmentM} м
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             </section>

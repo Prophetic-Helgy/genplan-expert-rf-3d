@@ -83,6 +83,8 @@ export interface BuildingDoorsConfig {
 export interface InteriorSunPatch {
   facade: 'south' | 'north' | 'east' | 'west';
   windowIndex: number;
+  floorIndex?: number; // 0 = 1-й этаж, 1 = 2-й этаж, 2 = 3-й этаж
+  floorElevationY?: number; // локальная высота Y поверхности пола/перекрытия этажа (м)
   windowCenterLocal: { x: number; y: number; z: number };
   windowCornersLocal3D: Array<{ x: number; y: number; z: number }>;
   floorPolygonLocal: Point2D[];
@@ -459,6 +461,9 @@ export interface NormViolation {
   requiredValue?: number;
 }
 
+export type WindDirection8 = 'N' | 'NE' | 'E' | 'SE' | 'S' | 'SW' | 'W' | 'NW';
+export type WindZoneId = 'I' | 'II' | 'III' | 'IV' | 'V' | 'VI' | 'VII';
+
 export interface RegionInfo {
   id: string;
   name: string;
@@ -466,6 +471,14 @@ export interface RegionInfo {
   lng: number;
   snowZone: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
   snowLoadSg: number; // kg/m² normative snow weight S_g
+  windZone: WindZoneId; // Ветровой район по СП 20.13330.2016 Табл. 11.1
+  windPressureW0Pa: number; // Нормативное ветровое давление w_0 (Па)
+  windPressureW0KgM2: number; // Нормативное ветровое давление w_0 (кгс/м²)
+  avgWindSpeedMs: number; // Средняя скорость ветра (м/с) по СП 131.13330.2020
+  maxGustWindSpeedMs: number; // Расчетная порывистая скорость ветра (м/с)
+  prevailingWindDir: WindDirection8; // Господствующее направление ветра
+  prevailingWindLabel: string; // Текстовое описание господствующего ветра (например, "ЮЗ (Юго-Западный)")
+  windRose: Record<WindDirection8, number>; // Повторяемость направлений ветра за год (%) по 8 румбам
   frostDepth: number; // meters d_f
   gsop: number; // Градусо-сутки отопительного периода
   rReqWall: number; // Требуемое сопротивление теплопередаче стен R_req (м²·°С/Вт)
@@ -551,3 +564,70 @@ export interface BOMSummary {
   fencePerimeterM: number;
   fencePostsCount: number;
 }
+
+export interface WindRoseSectorItem {
+  dir: WindDirection8;
+  labelRu: string;
+  shortRu: string;
+  azimuthDeg: number; // 0 = N, 45 = NE, 90 = E...
+  plotAngleDeg: number; // Azimuth adjusted for plot.northAngle
+  frequencyPercent: number;
+  isPrevailing: boolean;
+}
+
+export interface BuildingWindLoadResult {
+  objectId: string;
+  objectName: string;
+  buildingTotalHeightM: number;
+  heightFactorKze: number; // k(z_e) по Табл. 11.2 СП 20.13330.2016 (тип местности B)
+  gustFactorGf: number; // Коэффициент пульсации ветра (1 + ζ)
+  windwardPressureKgM2: number; // Наветренное расчетное давление (кгс/м²)
+  leewardSuctionKgM2: number; // Подветренный отсос (кгс/м²)
+  roofUpliftPressureKgM2: number; // Ветровой отрыв/давление на кровлю (кгс/м²)
+  windwardFacadeAreaSqm: number; // Наветренная площадь фасада (м²)
+  totalHorizontalForceKn: number; // Суммарная горизонтальная ветровая нагрузка на здание (кН)
+  totalHorizontalForceKgf: number; // Суммарная горизонтальная ветровая нагрузка (кгс)
+  overturningMomentKnm: number; // Опрокидывающий ветровой момент (кН·м)
+  mostLoadedFacadeLabel: string; // Наиболее нагруженный ветром фасад
+  roofAnchorRecommendation: string; // Рекомендация по креплению мауэрлата и стропил от ветрового отрыва
+}
+
+export interface FenceWindLoadItem {
+  edgeIndex: number;
+  edgeLabel: string;
+  borderType: BoundaryEdgeType;
+  fenceType: FenceType;
+  fenceHeightM: number;
+  edgeLengthM: number;
+  fillFactorPhi: number; // Коэффициент сплошности (1.0 для глухого профлиста, 0.25 для сетки/штакетника)
+  aerodynamicCx: number; // Аэродинамический коэффициент лобового сопротивления c_x
+  designWindPressureKgM2: number; // Расчетная ветровая нагрузка на 1 м² полотна забора (кгс/м²)
+  forcePerPostKgf: number; // Ветровое усилие на 1 столб при шаге 2.5 м (кгс)
+  bendingMomentPerPostKnm: number; // Изгибающий момент у основания столба M (кН·м)
+  totalEdgeWindForceKn: number; // Суммарная ветровая нагрузка на всю сторону забора (кН)
+  recommendedPostSpec: string; // Рекомендуемое сечение столба и шаг
+  recommendedEmbedmentM: number; // Рекомендуемая глубина бетонирования столба (м)
+  status: 'safe' | 'reinforced_required' | 'high_sail_warning';
+  statusLabel: string;
+}
+
+export interface PlotWindAnalysis {
+  regionId: string;
+  regionName: string;
+  windZone: WindZoneId;
+  normCode: string; // "СП 20.13330.2016 Раздел 11 / СП 131.13330.2020"
+  windPressureW0Pa: number;
+  windPressureW0KgM2: number;
+  designWindPressureW0KgM2: number; // с учетом коэф. надежности γ_f = 1.4
+  avgWindSpeedMs: number;
+  maxGustWindSpeedMs: number;
+  prevailingWindDir: WindDirection8;
+  prevailingWindLabel: string;
+  prevailingPlotVector: Point2D; // Направление господствующего ветра в координатах участка (куда дует ветер)
+  sectors: WindRoseSectorItem[];
+  selectedBuildingWind: BuildingWindLoadResult;
+  fences: FenceWindLoadItem[];
+  maxFenceMomentKnm: number;
+  summaryRecommendation: string;
+}
+

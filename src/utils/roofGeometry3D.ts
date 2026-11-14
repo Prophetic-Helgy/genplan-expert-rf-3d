@@ -984,18 +984,19 @@ function buildEnvironmentOrUtility3DGroup(
     }
   } else if (obj.category === 'gas_pipe' || obj.category === 'water_main' || obj.category === 'sewer_main') {
     const pipeColor =
-      obj.category === 'gas_pipe' ? 0xeab308 : obj.category === 'water_main' ? 0x2563eb : 0x92400e;
+      obj.category === 'gas_pipe' ? 0xeab308 : obj.category === 'water_main' ? 0x38bdf8 : 0xd97706;
     const burialDepth = Math.max(0, obj.burialDepth ?? getDefaultBurialDepth(obj.category));
     const pipeDiamMm = Math.max(20, Math.min(1200, obj.pipelineDiameterMm ?? getDefaultPipelineDiameterMm(obj.category)));
     const pipeMat = new THREE.MeshStandardMaterial({
       color: pipeColor,
-      roughness: 0.32,
-      metalness: 0.45,
+      roughness: 0.25,
+      metalness: 0.5,
       emissive: undergroundViewMode ? pipeColor : 0x000000,
-      emissiveIntensity: undergroundViewMode ? 0.35 : 0
+      emissiveIntensity: undergroundViewMode ? 0.72 : 0
     });
-    const pipeRadius = Math.min(0.45, Math.max(0.10, (pipeDiamMm / 1000) * 1.45));
-    const pipeGeo = new THREE.CylinderGeometry(pipeRadius, pipeRadius, W, 16);
+    const basePipeRadius = Math.min(0.45, Math.max(0.10, (pipeDiamMm / 1000) * 1.45));
+    const pipeRadius = undergroundViewMode ? Math.max(0.24, basePipeRadius * 1.65) : basePipeRadius;
+    const pipeGeo = new THREE.CylinderGeometry(pipeRadius, pipeRadius, W, 20);
     pipeGeo.rotateZ(Math.PI / 2);
 
     // Main underground pipe at -burialDepth (or slightly above ground if burialDepth === 0)
@@ -1003,18 +1004,39 @@ function buildEnvironmentOrUtility3DGroup(
     const pipeMesh = new THREE.Mesh(pipeGeo, pipeMat);
     pipeMesh.position.y = pipeY;
     pipeMesh.castShadow = burialDepth === 0;
-    pipeMesh.userData = { isUndergroundPipe: burialDepth > 0, burialDepth, pipelineDiameterMm: pipeDiamMm };
+    pipeMesh.userData = {
+      isUndergroundPipe: burialDepth > 0,
+      burialDepth,
+      pipelineDiameterMm: pipeDiamMm,
+      category: obj.category
+    };
     group.add(pipeMesh);
+
+    // Glowing underground ring bands every 2.5m along the buried pipe so its depth & trajectory stand out in 3D
+    if (burialDepth > 0) {
+      const bandMat = new THREE.MeshBasicMaterial({
+        color: obj.category === 'water_main' ? 0x7dd3fc : obj.category === 'gas_pipe' ? 0xfef08a : 0xfde68a
+      });
+      const bandCount = Math.max(3, Math.floor(W / 2.5));
+      for (let b = 0; b <= bandCount; b++) {
+        const bx = -W / 2 + (b / bandCount) * W;
+        const bandGeo = new THREE.CylinderGeometry(pipeRadius * 1.24, pipeRadius * 1.24, 0.14, 16);
+        bandGeo.rotateZ(Math.PI / 2);
+        const bandMesh = new THREE.Mesh(bandGeo, bandMat);
+        bandMesh.position.set(bx, pipeY, 0);
+        group.add(bandMesh);
+      }
+    }
 
     // Surface trace indicator line so utility route remains visible even when ground is opaque
     if (burialDepth > 0) {
       const traceMat = new THREE.MeshStandardMaterial({
         color: pipeColor,
-        roughness: 0.5,
+        roughness: 0.45,
         transparent: true,
-        opacity: undergroundViewMode ? 0.45 : 0.85
+        opacity: undergroundViewMode ? 0.55 : 0.88
       });
-      const traceGeo = new THREE.CylinderGeometry(pipeRadius * 0.45, pipeRadius * 0.45, W, 12);
+      const traceGeo = new THREE.CylinderGeometry(basePipeRadius * 0.48, basePipeRadius * 0.48, W, 12);
       traceGeo.rotateZ(Math.PI / 2);
       const traceMesh = new THREE.Mesh(traceGeo, traceMat);
       traceMesh.position.y = 0.08;
@@ -1022,12 +1044,14 @@ function buildEnvironmentOrUtility3DGroup(
     }
 
     // Marker posts / manholes along the utility line + vertical underground inspection shafts
-    const postCount = Math.max(2, Math.min(5, Math.floor(W / 8) + 1));
+    const postCount = Math.max(2, Math.min(6, Math.floor(W / 6) + 1));
     const shaftMat = new THREE.MeshStandardMaterial({
-      color: 0x64748b,
-      roughness: 0.75,
+      color: undergroundViewMode ? pipeColor : 0x64748b,
+      roughness: 0.55,
+      emissive: undergroundViewMode ? pipeColor : 0x000000,
+      emissiveIntensity: undergroundViewMode ? 0.35 : 0,
       transparent: undergroundViewMode,
-      opacity: undergroundViewMode ? 0.82 : 1.0
+      opacity: undergroundViewMode ? 0.85 : 1.0
     });
     for (let i = 0; i < postCount; i++) {
       const px = (-W / 2 + 1) + (i / Math.max(1, postCount - 1)) * Math.max(1, W - 2);
@@ -1043,9 +1067,9 @@ function buildEnvironmentOrUtility3DGroup(
 
       // Vertical riser / manhole shaft down to the buried pipe
       if (burialDepth > 0) {
-        const riserRadius = obj.category === 'gas_pipe' ? 0.07 : 0.34;
+        const riserRadius = obj.category === 'gas_pipe' ? 0.10 : 0.34;
         const riserMesh = new THREE.Mesh(
-          new THREE.CylinderGeometry(riserRadius, riserRadius, burialDepth + 0.1, 12),
+          new THREE.CylinderGeometry(riserRadius, riserRadius, burialDepth + 0.1, 14),
           shaftMat
         );
         riserMesh.position.set(px, -burialDepth / 2, 0);
@@ -1053,12 +1077,28 @@ function buildEnvironmentOrUtility3DGroup(
       }
     }
 
-    // Trench outline in underground view mode
+    // Translucent Subterranean Trench Volume & Glowing Outline in underground view mode
     if (undergroundViewMode && burialDepth > 0) {
-      const trenchGeo = new THREE.EdgesGeometry(new THREE.BoxGeometry(W, burialDepth, Math.max(0.8, pipeRadius * 3.2)));
+      const trenchW = Math.max(1.1, pipeRadius * 3.8);
+      const trenchVolMat = new THREE.MeshBasicMaterial({
+        color: pipeColor,
+        transparent: true,
+        opacity: 0.18,
+        side: THREE.DoubleSide,
+        depthWrite: false
+      });
+      const trenchVolMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(W, burialDepth, trenchW),
+        trenchVolMat
+      );
+      trenchVolMesh.position.y = -burialDepth / 2;
+      trenchVolMesh.userData = { isUndergroundTrench: true, burialDepth };
+      group.add(trenchVolMesh);
+
+      const trenchGeo = new THREE.EdgesGeometry(new THREE.BoxGeometry(W, burialDepth, trenchW));
       const trenchWire = new THREE.LineSegments(
         trenchGeo,
-        new THREE.LineBasicMaterial({ color: pipeColor, transparent: true, opacity: 0.75 })
+        new THREE.LineBasicMaterial({ color: pipeColor, transparent: true, opacity: 0.95 })
       );
       trenchWire.position.y = -burialDepth / 2;
       group.add(trenchWire);
@@ -1360,11 +1400,11 @@ export function buildSiteObject3DGroup(
 
   // 1. Foundation Slab (Плита фундамента с регулируемым выступом и толщиной), Underground Basement & Plinth
   const foundationSlabMat = new THREE.MeshStandardMaterial({
-    color: activeThermalMap ? 0x0284c7 : 0x64748b,
-    roughness: 0.88,
-    metalness: 0.12,
-    emissive: undergroundViewMode ? 0x0ea5e9 : activeThermalMap ? 0x0369a1 : 0x000000,
-    emissiveIntensity: undergroundViewMode ? 0.18 : activeThermalMap ? 0.22 : 0
+    color: activeThermalMap ? 0x0284c7 : undergroundViewMode ? 0x0ea5e9 : 0x64748b,
+    roughness: 0.75,
+    metalness: 0.18,
+    emissive: undergroundViewMode ? 0x0284c7 : activeThermalMap ? 0x0369a1 : 0x000000,
+    emissiveIntensity: undergroundViewMode ? 0.45 : activeThermalMap ? 0.22 : 0
   });
 
   const plinthMat = new THREE.MeshStandardMaterial({
@@ -1372,15 +1412,20 @@ export function buildSiteObject3DGroup(
     roughness: 0.85,
     metalness: 0.1,
     emissive: activeThermalMap ? 0xd97706 : 0x000000,
-    emissiveIntensity: activeThermalMap ? 0.42 : 0
+    emissiveIntensity: activeThermalMap ? 0.42 : 0,
+    transparent: undergroundViewMode,
+    opacity: undergroundViewMode ? 0.35 : 1.0,
+    depthWrite: !undergroundViewMode
   });
 
   const basementWallMat = new THREE.MeshStandardMaterial({
-    color: 0x334155,
-    roughness: 0.82,
-    metalness: 0.15,
+    color: undergroundViewMode ? 0x0284c7 : 0x334155,
+    roughness: 0.55,
+    metalness: 0.2,
+    emissive: undergroundViewMode ? 0x0ea5e9 : 0x000000,
+    emissiveIntensity: undergroundViewMode ? 0.48 : 0,
     transparent: undergroundViewMode || xrayWallsMode,
-    opacity: undergroundViewMode || xrayWallsMode ? 0.48 : 0.92,
+    opacity: undergroundViewMode ? 0.62 : xrayWallsMode ? 0.48 : 0.92,
     depthWrite: !(undergroundViewMode || xrayWallsMode),
     side: THREE.DoubleSide
   });
@@ -1389,6 +1434,9 @@ export function buildSiteObject3DGroup(
     color: xrayWallsMode ? 0x334155 : 0x1e293b,
     roughness: 0.75,
     metalness: 0.05,
+    transparent: undergroundViewMode && hasBasement,
+    opacity: undergroundViewMode && hasBasement ? 0.28 : 1.0,
+    depthWrite: !(undergroundViewMode && hasBasement),
     side: THREE.DoubleSide
   });
 
@@ -1403,8 +1451,9 @@ export function buildSiteObject3DGroup(
   fndSlabMesh.userData = { isFoundationSlab: true, overhang: fndOverhang, thickness: fndThick };
   group.add(fndSlabMesh);
 
-  // If the building has an underground basement, also render a ground-level slab collar/apron so fndOverhang is visible at Y=0
-  if (hasBasement && fndOverhang > 0.01) {
+  // If the building has an underground basement, only render ground-level slab collar when NOT in undergroundViewMode
+  // so it never acts as an opaque lid hiding the basement interior from above
+  if (hasBasement && fndOverhang > 0.01 && !undergroundViewMode) {
     const collarMesh = new THREE.Mesh(new THREE.BoxGeometry(slabW, 0.08, slabL), foundationSlabMat);
     collarMesh.position.y = 0.04;
     collarMesh.receiveShadow = true;
@@ -1424,17 +1473,55 @@ export function buildSiteObject3DGroup(
       new THREE.LineBasicMaterial({
         color: undergroundViewMode ? 0x38bdf8 : 0x94a3b8,
         transparent: true,
-        opacity: 0.85
+        opacity: undergroundViewMode ? 1.0 : 0.85
       })
     );
     bsmWire.position.y = -basementDepth / 2;
     group.add(bsmWire);
 
-    // Basement floor plane
-    const bsmFloor = new THREE.Mesh(new THREE.PlaneGeometry(W - 0.2, L - 0.2), interiorFloorMat);
+    // Basement floor plane (illuminated in undergroundViewMode so the basement floor slab is clearly visible)
+    const bsmFloorMat = new THREE.MeshStandardMaterial({
+      color: undergroundViewMode ? 0x0369a1 : 0x1e293b,
+      roughness: 0.65,
+      emissive: undergroundViewMode ? 0x0284c7 : 0x000000,
+      emissiveIntensity: undergroundViewMode ? 0.35 : 0,
+      side: THREE.DoubleSide
+    });
+    const bsmFloor = new THREE.Mesh(new THREE.PlaneGeometry(W - 0.16, L - 0.16), bsmFloorMat);
     bsmFloor.rotation.x = -Math.PI / 2;
     bsmFloor.position.y = -basementDepth + 0.02;
     group.add(bsmFloor);
+
+    // Interior basement cross-partitions & staircase so the underground level reads as an architectural floor
+    const partMat = new THREE.MeshStandardMaterial({
+      color: undergroundViewMode ? 0x38bdf8 : 0x475569,
+      roughness: 0.6,
+      emissive: undergroundViewMode ? 0x0284c7 : 0x000000,
+      emissiveIntensity: undergroundViewMode ? 0.4 : 0,
+      transparent: true,
+      opacity: undergroundViewMode ? 0.78 : 0.55
+    });
+    const partX = new THREE.Mesh(new THREE.BoxGeometry(W - 0.24, basementDepth * 0.92, 0.16), partMat);
+    partX.position.set(0, -basementDepth / 2, 0);
+    const partZ = new THREE.Mesh(new THREE.BoxGeometry(0.16, basementDepth * 0.92, L - 0.24), partMat);
+    partZ.position.set(0, -basementDepth / 2, 0);
+    group.add(partX, partZ);
+
+    // Basement access stairs (8 steps descending from y=0 to y=-basementDepth)
+    const stairSteps = 7;
+    for (let st = 0; st < stairSteps; st++) {
+      const stepT = (st + 0.5) / stairSteps;
+      const stepMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(Math.min(1.1, W * 0.2), 0.12, 0.32),
+        partMat
+      );
+      stepMesh.position.set(
+        -W * 0.26,
+        -stepT * (basementDepth - 0.2),
+        -L * 0.25 + (st - stairSteps / 2) * 0.3
+      );
+      group.add(stepMesh);
+    }
   }
 
   const wallThick = 0.22;
@@ -1444,7 +1531,7 @@ export function buildSiteObject3DGroup(
   if (footprintShape === 'rectangle') {
     const plinthMesh = new THREE.Mesh(new THREE.BoxGeometry(W + 0.12, plinthH, L + 0.12), plinthMat);
     plinthMesh.position.y = plinthH / 2;
-    plinthMesh.castShadow = true;
+    plinthMesh.castShadow = !undergroundViewMode;
     plinthMesh.receiveShadow = true;
     group.add(plinthMesh);
 
@@ -1462,34 +1549,49 @@ export function buildSiteObject3DGroup(
         metalness: 0.12,
         emissive: activeThermalMap ? 0xea580c : 0x000000,
         emissiveIntensity: activeThermalMap ? 0.52 : 0,
-        transparent: xrayWallsMode,
-        opacity: xrayWallsMode ? 0.55 : 0.95
+        transparent: xrayWallsMode || undergroundViewMode,
+        opacity: xrayWallsMode || undergroundViewMode ? 0.28 : 0.95,
+        depthWrite: !(xrayWallsMode || undergroundViewMode)
       });
       for (let s = 1; s < floorsAbove; s++) {
         const slabCenterY = plinthH + s * floorH + (s - 0.5) * slabThick;
+        const interSlabGeo = new THREE.BoxGeometry(innerSlabW, slabThick, innerSlabL);
         const interSlabMesh = new THREE.Mesh(
-          new THREE.BoxGeometry(innerSlabW, slabThick, innerSlabL),
+          interSlabGeo,
           interSlabMat
         );
         interSlabMesh.position.y = slabCenterY;
         interSlabMesh.userData = { isInterfloorSlab: true, floorIndex: s, thickness: slabThick };
         group.add(interSlabMesh);
+
+        if (xrayWallsMode) {
+          const slabEdges = new THREE.EdgesGeometry(interSlabGeo);
+          const slabEdgeLines = new THREE.LineSegments(
+            slabEdges,
+            new THREE.LineBasicMaterial({ color: 0x94a3b8, transparent: true, opacity: 0.75 })
+          );
+          slabEdgeLines.position.y = slabCenterY;
+          group.add(slabEdgeLines);
+        }
       }
     }
 
     if (xrayWallsMode && W >= 4 && L >= 4) {
-      const partPts = [
-        new THREE.Vector3(-innerSlabW / 2 + 0.05, plinthH + 0.03, 0),
-        new THREE.Vector3(innerSlabW / 2 - 0.05, plinthH + 0.03, 0),
-        new THREE.Vector3(0, plinthH + 0.03, -innerSlabL / 2 + 0.05),
-        new THREE.Vector3(0, plinthH + 0.03, innerSlabL / 2 - 0.05)
-      ];
-      const partGeo = new THREE.BufferGeometry().setFromPoints(partPts);
-      const partLines = new THREE.LineSegments(
-        partGeo,
-        new THREE.LineBasicMaterial({ color: 0x64748b, transparent: true, opacity: 0.7 })
-      );
-      group.add(partLines);
+      for (let s = 0; s < floorsAbove; s++) {
+        const partY = plinthH + (floorsAbove > 1 ? s * (floorH + slabThick) : 0) + 0.03;
+        const partPts = [
+          new THREE.Vector3(-innerSlabW / 2 + 0.05, partY, 0),
+          new THREE.Vector3(innerSlabW / 2 - 0.05, partY, 0),
+          new THREE.Vector3(0, partY, -innerSlabL / 2 + 0.05),
+          new THREE.Vector3(0, partY, innerSlabL / 2 - 0.05)
+        ];
+        const partGeo = new THREE.BufferGeometry().setFromPoints(partPts);
+        const partLines = new THREE.LineSegments(
+          partGeo,
+          new THREE.LineBasicMaterial({ color: 0x64748b, transparent: true, opacity: 0.7 })
+        );
+        group.add(partLines);
+      }
     }
   } else {
     const polyShape = new THREE.Shape();
@@ -1545,7 +1647,7 @@ export function buildSiteObject3DGroup(
 
   // 2. Walls & Windows (Hollow walls with real window cutouts on each story so sunlight enters the house)
   const isGreenhouse = obj.category === 'greenhouse';
-  const isTransparentMode = isGreenhouse || xrayWallsMode;
+  const isTransparentMode = isGreenhouse || xrayWallsMode || undergroundViewMode;
 
   const createFacadeWallMat = (facadeKey?: 'south' | 'north' | 'east' | 'west') => {
     const facadeMetric = activeThermalMap?.facades.find((f) => f.facade === facadeKey) || activeThermalMap?.highestLossFacade;
@@ -1555,7 +1657,7 @@ export function buildSiteObject3DGroup(
       roughness: activeThermalMap ? 0.45 : isGreenhouse ? 0.2 : 0.72,
       metalness: isGreenhouse ? 0.1 : 0.08,
       transparent: isTransparentMode,
-      opacity: isGreenhouse ? 0.45 : xrayWallsMode ? 0.30 : 1.0,
+      opacity: isGreenhouse ? 0.45 : xrayWallsMode ? 0.30 : undergroundViewMode ? 0.32 : 1.0,
       depthWrite: !isTransparentMode,
       emissive: activeThermalMap ? baseHex : statusEmissive,
       emissiveIntensity: activeThermalMap ? 0.38 : hasErrorViolation ? 0.45 : isSelected ? 0.22 : 0,
@@ -1784,10 +1886,9 @@ export function buildSiteObject3DGroup(
     }
   }
 
-  // 3. Interior Sunlight Patches (Световое пятно на полу и солнечные лучи из окон)
+  // 3. Interior Sunlight Patches (Световое пятно на полу и перекрытиях 1, 2 и 3 этажей + солнечные лучи из окон)
   if (sunVector && sunVector.altitudeDeg > 2) {
-    const patches = calculateInteriorSunPatches(obj, sunVector);
-    const floorPatchY = plinthH + 0.045;
+    const patches = calculateInteriorSunPatches(obj, sunVector, true);
 
     const patchMat = new THREE.MeshBasicMaterial({
       color: 0xfef08a,
@@ -1809,7 +1910,9 @@ export function buildSiteObject3DGroup(
       const pts = patch.floorPolygonLocal;
       if (pts.length < 3) continue;
 
-      // Floor Light Patch Polygon (Световое пятно)
+      const patchFloorY = patch.floorElevationY ?? (plinthH + 0.045);
+
+      // Floor / Interfloor Slab Light Patch Polygon (Световое пятно на перекрытии соответствующего этажа)
       const patchShape = new THREE.Shape();
       // Shape is in (X, Y); after rotateX(-PI/2), shape Y becomes -Z => pass (pt.x, -pt.z)
       patchShape.moveTo(pts[0].x, -pts[0].z);
@@ -1821,33 +1924,40 @@ export function buildSiteObject3DGroup(
       const patchGeo = new THREE.ShapeGeometry(patchShape);
       patchGeo.rotateX(-Math.PI / 2);
       const patchMesh = new THREE.Mesh(patchGeo, patchMat);
-      patchMesh.position.y = floorPatchY;
-      patchMesh.userData = { isSunPatch: true, facade: patch.facade };
+      patchMesh.position.y = patchFloorY;
+      patchMesh.renderOrder = 15;
+      patchMesh.userData = {
+        isSunPatch: true,
+        facade: patch.facade,
+        floorIndex: patch.floorIndex ?? 0,
+        floorElevationY: patchFloorY
+      };
       group.add(patchMesh);
 
       // Glowing amber outline around the floor light patch
       const borderPts = [
-        ...pts.map((p) => new THREE.Vector3(p.x, floorPatchY + 0.01, p.z)),
-        new THREE.Vector3(pts[0].x, floorPatchY + 0.01, pts[0].z)
+        ...pts.map((p) => new THREE.Vector3(p.x, patchFloorY + 0.01, p.z)),
+        new THREE.Vector3(pts[0].x, patchFloorY + 0.01, pts[0].z)
       ];
       const borderGeo = new THREE.BufferGeometry().setFromPoints(borderPts);
       const borderLine = new THREE.Line(
         borderGeo,
         new THREE.LineBasicMaterial({ color: 0xf59e0b })
       );
+      borderLine.renderOrder = 16;
       group.add(borderLine);
 
-      // Volumetric 3D Sunbeam connecting window opening corners to floor light patch corners
+      // Volumetric 3D Sunbeam connecting window opening corners on floor s to floor/interfloor slab light patch corners
       if (xrayWallsMode && patch.windowCornersLocal3D.length === 4 && pts.length === 4) {
         const w0 = patch.windowCornersLocal3D[0];
         const w1 = patch.windowCornersLocal3D[1];
         const w2 = patch.windowCornersLocal3D[2];
         const w3 = patch.windowCornersLocal3D[3];
 
-        const f0 = { x: pts[0].x, y: floorPatchY, z: pts[0].z };
-        const f1 = { x: pts[1].x, y: floorPatchY, z: pts[1].z };
-        const f2 = { x: pts[2].x, y: floorPatchY, z: pts[2].z };
-        const f3 = { x: pts[3].x, y: floorPatchY, z: pts[3].z };
+        const f0 = { x: pts[0].x, y: patchFloorY, z: pts[0].z };
+        const f1 = { x: pts[1].x, y: patchFloorY, z: pts[1].z };
+        const f2 = { x: pts[2].x, y: patchFloorY, z: pts[2].z };
+        const f3 = { x: pts[3].x, y: patchFloorY, z: pts[3].z };
 
         const beamVerts = new Float32Array([
           w0.x, w0.y, w0.z, // 0
@@ -1879,6 +1989,7 @@ export function buildSiteObject3DGroup(
         beamGeo.setAttribute('position', new THREE.BufferAttribute(beamVerts, 3));
         beamGeo.setIndex(new THREE.BufferAttribute(beamIdx, 1));
         const beamMesh = new THREE.Mesh(beamGeo, beamMat);
+        beamMesh.renderOrder = 14;
         group.add(beamMesh);
       }
     }
@@ -1895,7 +2006,7 @@ export function buildSiteObject3DGroup(
     obj.slopeDirection,
     roofHex,
     wallMat,
-    xrayWallsMode
+    xrayWallsMode || undergroundViewMode
   );
   group.add(roofGroup);
 

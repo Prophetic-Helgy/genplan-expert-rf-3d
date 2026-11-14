@@ -54,6 +54,7 @@ export const PromoVideoShowcaseModal: React.FC<PromoVideoShowcaseModalProps> = (
   const [isPlaying, setIsPlaying] = useState<boolean>(true);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
   const [resolutionId, setResolutionId] = useState<PromoVideoResolutionId>('1080p');
+  const resolutionIdRef = useRef<PromoVideoResolutionId>('1080p');
   const [presentationMode, setPresentationMode] = useState<'studio' | 'hud'>('studio');
   const [isRecordingWebm, setIsRecordingWebm] = useState<boolean>(false);
   const [isExportingMp4, setIsExportingMp4] = useState<boolean>(false);
@@ -79,98 +80,58 @@ export const PromoVideoShowcaseModal: React.FC<PromoVideoShowcaseModalProps> = (
   );
 
   const refreshLiveSnapshot = useCallback(() => {
-    const dataUrl = getCanvasSnapshot();
-    if (!dataUrl || !dataUrl.startsWith('data:image/')) return;
-    const img = new Image();
-    img.onload = () => {
-      liveSnapshotImgRef.current = img;
-    };
-    img.src = dataUrl;
-  }, [getCanvasSnapshot]);
+    // Live 3D/2D canvas is rendered synchronously via window.__renderLiveViewportCanvasForPromo
+  }, []);
 
-  // Synchronize live application workspace state whenever the active promo scene changes
+  // Synchronize live application workspace state whenever the active promo scene changes in HUD mode
   useEffect(() => {
     if (!isOpen) {
       lastAppliedSceneIdRef.current = '';
+      (window as unknown as { __restoreViewportAfterPromo?: () => void }).__restoreViewportAfterPromo?.();
       return;
     }
-    if (lastAppliedSceneIdRef.current !== activeScene.id) {
+    if (presentationMode === 'hud' && lastAppliedSceneIdRef.current !== activeScene.id) {
       lastAppliedSceneIdRef.current = activeScene.id;
       onApplyPromoSceneState(activeScene.appAction);
-      const timer = window.setTimeout(() => {
-        refreshLiveSnapshot();
-      }, 140);
-      return () => window.clearTimeout(timer);
     }
-  }, [activeScene, isOpen, onApplyPromoSceneState, refreshLiveSnapshot]);
+  }, [activeScene, isOpen, onApplyPromoSceneState, presentationMode]);
 
-  // During Scene 03 (Sun & Insolation), smoothly animate the sun hour in the live workspace
+  // Main timeline progression loop (throttled to ~15 FPS so software WebGL + UI controls stay snappy)
   useEffect(() => {
-    if (!isOpen || !isPlaying) return;
-    if (activeScene.visualFocus === 'sun_insolation_xray') {
-      const now = performance.now();
-      if (now - lastSunSyncTimeRef.current > 280) {
-        lastSunSyncTimeRef.current = now;
-        const animatedHour = Number((9.5 + sceneLocalProgress01 * 8.5).toFixed(2));
-        onApplyPromoSceneState({
-          ...activeScene.appAction,
-          hourOfDay: animatedHour
-        });
-        refreshLiveSnapshot();
-      }
-    }
-  }, [
-    activeScene,
-    isOpen,
-    isPlaying,
-    onApplyPromoSceneState,
-    refreshLiveSnapshot,
-    sceneLocalProgress01
-  ]);
-
-  // Periodic snapshot refresh while open
-  useEffect(() => {
-    if (!isOpen) return;
-    refreshLiveSnapshot();
-    const id = window.setInterval(() => {
-      refreshLiveSnapshot();
-    }, 650);
-    return () => window.clearInterval(id);
-  }, [isOpen, refreshLiveSnapshot]);
-
-  // Main timeline progression loop
-  useEffect(() => {
-    if (!isOpen || !isPlaying) return;
+    if (!isOpen || !isPlaying || isExportingMp4) return;
     let lastTs = performance.now();
     let rafId = 0;
 
     const tick = (now: number) => {
-      const dt = Math.min(0.1, Math.max(0, (now - lastTs) / 1000));
-      lastTs = now;
-      setElapsedSec((prev) => {
-        const next = prev + dt * playbackSpeed;
-        if (next >= PROMO_VIDEO_TOTAL_DURATION_SEC) {
-          if (
-            isRecordingWebm &&
-            mediaRecorderRef.current &&
-            mediaRecorderRef.current.state === 'recording'
-          ) {
-            mediaRecorderRef.current.stop();
+      const elapsedMs = now - lastTs;
+      if (elapsedMs >= 66) {
+        const dt = Math.min(0.15, Math.max(0, elapsedMs / 1000));
+        lastTs = now;
+        setElapsedSec((prev) => {
+          const next = prev + dt * playbackSpeed;
+          if (next >= PROMO_VIDEO_TOTAL_DURATION_SEC) {
+            if (
+              isRecordingWebm &&
+              mediaRecorderRef.current &&
+              mediaRecorderRef.current.state === 'recording'
+            ) {
+              mediaRecorderRef.current.stop();
+            }
+            return 0;
           }
-          return 0;
-        }
-        return next;
-      });
+          return next;
+        });
+      }
       rafId = window.requestAnimationFrame(tick);
     };
 
     rafId = window.requestAnimationFrame(tick);
     return () => window.cancelAnimationFrame(rafId);
-  }, [isOpen, isPlaying, playbackSpeed, isRecordingWebm]);
+  }, [isOpen, isPlaying, isExportingMp4, playbackSpeed, isRecordingWebm]);
 
   // Pure Code-Generated 16:9 Canvas Renderer (1920x1080 Full HD, 2560x1440 2K, 3840x2160 4K)
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || isExportingMp4) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -191,6 +152,7 @@ export const PromoVideoShowcaseModal: React.FC<PromoVideoShowcaseModalProps> = (
   }, [
     activeScene,
     elapsedSec,
+    isExportingMp4,
     isOpen,
     liveMetrics,
     overallProgress01,
@@ -202,9 +164,10 @@ export const PromoVideoShowcaseModal: React.FC<PromoVideoShowcaseModalProps> = (
   ]);
 
   const handleSelectScene = (scene: PromoVideoScene) => {
-    setElapsedSec(scene.startSec + 0.05);
-    onApplyPromoSceneState(scene.appAction);
-    window.setTimeout(() => refreshLiveSnapshot(), 120);
+    setElapsedSec(scene.startSec + 0.35);
+    if (presentationMode === 'hud') {
+      onApplyPromoSceneState(scene.appAction);
+    }
   };
 
   const handlePrevScene = () => {
@@ -230,11 +193,13 @@ export const PromoVideoShowcaseModal: React.FC<PromoVideoShowcaseModalProps> = (
 
   const handleExportMp4 = async () => {
     if (isExportingMp4) return;
+    const activeResId = resolutionIdRef.current;
+    const activeResSpec = PROMO_VIDEO_RESOLUTIONS[activeResId] || PROMO_VIDEO_RESOLUTIONS['1080p'];
     setIsExportingMp4(true);
-    setRecordingStatusText(`Подготовка экспорта MP4 (${resSpec.shortLabel} 16:9)...`);
+    setRecordingStatusText(`Подготовка экспорта MP4 (${activeResSpec.shortLabel} 16:9)...`);
     try {
       const meta = await exportPromoVideoToMp4({
-        resolutionId,
+        resolutionId: activeResId,
         plot,
         objects,
         violationsCount: violations.length,
@@ -400,7 +365,7 @@ export const PromoVideoShowcaseModal: React.FC<PromoVideoShowcaseModalProps> = (
                     : 'bg-slate-900 text-slate-300 hover:bg-slate-800'
                 }`}
               >
-                {s.index}. {s.kicker.replace(/^СЦЕНА 0\d · /, '')}
+                {s.index}. {s.kicker.replace(/^СЦЕНА \d+ · /, '')}
               </button>
             ))}
           </div>
@@ -453,8 +418,11 @@ export const PromoVideoShowcaseModal: React.FC<PromoVideoShowcaseModalProps> = (
             </div>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-sm sm:text-base font-bold text-white break-words">
-                  Продающий рекламный ролик «ГенПлан-Эксперт РФ 3D»
+                <h2
+                  data-testid="promo-video-modal-title"
+                  className="text-sm sm:text-base font-bold text-white break-words"
+                >
+                  Промо рекламный ролик «ГенПлан-Эксперт РФ 3D»
                 </h2>
                 <span
                   data-testid="promo-active-resolution-badge"
@@ -484,7 +452,10 @@ export const PromoVideoShowcaseModal: React.FC<PromoVideoShowcaseModalProps> = (
                     key={rId}
                     type="button"
                     data-testid={`promo-res-${rId}`}
-                    onClick={() => setResolutionId(rId)}
+                    onClick={() => {
+                      resolutionIdRef.current = rId;
+                      setResolutionId(rId);
+                    }}
                     className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-colors cursor-pointer ${
                       isSelected
                         ? 'bg-sky-600 text-white shadow-sm'
@@ -575,14 +546,6 @@ export const PromoVideoShowcaseModal: React.FC<PromoVideoShowcaseModalProps> = (
               onClick={() => setIsPlaying((p) => !p)}
               className="w-full h-full object-contain cursor-pointer"
             />
-            {recordingStatusText && (
-              <div
-                data-testid="promo-export-status-badge"
-                className="absolute top-3 right-3 px-3 py-1.5 rounded-lg bg-slate-950/95 border border-emerald-500/60 text-emerald-300 text-xs font-semibold shadow-lg max-w-md break-words"
-              >
-                {recordingStatusText}
-              </div>
-            )}
           </div>
 
           {/* Player Transport & Scene Timeline Controls */}
@@ -629,6 +592,15 @@ export const PromoVideoShowcaseModal: React.FC<PromoVideoShowcaseModalProps> = (
                 >
                   <SkipForward className="w-4 h-4" />
                 </button>
+
+                {recordingStatusText && (
+                  <div
+                    data-testid="promo-export-status-badge"
+                    className="px-3 py-1.5 rounded-lg bg-emerald-950/90 border border-emerald-500/60 text-emerald-300 text-xs font-semibold break-words"
+                  >
+                    {recordingStatusText}
+                  </div>
+                )}
               </div>
 
               {/* Resolution Info & Speed Selector */}

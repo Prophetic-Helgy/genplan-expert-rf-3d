@@ -18,7 +18,8 @@ import {
   Scale,
   Maximize2,
   Layers,
-  Sliders
+  Sliders,
+  Wind
 } from 'lucide-react';
 import {
   PlotConfig,
@@ -46,7 +47,8 @@ import {
   getDefaultBurialDepth,
   getDefaultPipelineDiameterMm,
   getEffectivePlotRelief,
-  calculatePlotReliefAndDrainage
+  calculatePlotReliefAndDrainage,
+  calculateWindRoseAndLoads
 } from '../utils/calculations';
 import { MillimeterInput } from './MillimeterInput';
 
@@ -119,6 +121,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   const adjacentParcels = getEffectiveAdjacentParcels(plot);
   const plotReliefConfig = getEffectivePlotRelief(plot);
   const reliefAnalysis = calculatePlotReliefAndDrainage(plot, objects);
+  const windAnalysis = calculateWindRoseAndLoads(plot, objects, selectedObj);
 
   const updateAdjacentParcel = (
     parcelId: string,
@@ -334,7 +337,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
             type="button"
             data-testid="sidebar-tab-plot"
             onClick={() => setActiveTab('plot')}
-            className={`px-2 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
+            className={`px-1.5 py-1.5 text-[11px] font-medium rounded-md transition-colors whitespace-nowrap ${
               activeTab === 'plot'
                 ? 'bg-slate-800 text-white shadow-sm'
                 : 'text-slate-400 hover:text-slate-200'
@@ -346,7 +349,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
             type="button"
             data-testid="sidebar-tab-objects"
             onClick={() => setActiveTab('objects')}
-            className={`px-2 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
+            className={`px-1 py-1.5 text-[11px] font-medium rounded-md transition-colors whitespace-nowrap ${
               activeTab === 'objects'
                 ? 'bg-slate-800 text-white shadow-sm'
                 : 'text-slate-400 hover:text-slate-200'
@@ -358,7 +361,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
             type="button"
             data-testid="sidebar-tab-fences"
             onClick={() => setActiveTab('fences')}
-            className={`px-2 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
+            className={`px-1.5 py-1.5 text-[11px] font-medium rounded-md transition-colors whitespace-nowrap ${
               activeTab === 'fences'
                 ? 'bg-slate-800 text-white shadow-sm'
                 : 'text-slate-400 hover:text-slate-200'
@@ -510,13 +513,16 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
 
                 <div
                   data-testid="geo-resolved-summary"
-                  className="text-[10px] font-mono tabular-nums text-emerald-300 bg-emerald-950/30 border border-emerald-800/40 rounded px-2 py-1 leading-snug"
+                  className="text-[10px] font-mono tabular-nums text-emerald-300 bg-emerald-950/30 border border-emerald-800/40 rounded px-2 py-1.5 leading-snug space-y-0.5"
                 >
                   <div>
                     Точка: {currentRegion.lat.toFixed(4)}° СШ, {currentRegion.lng.toFixed(4)}° ВД
                   </div>
                   <div>
                     Снег: {currentRegion.snowZone} р-н (Sg={currentRegion.snowLoadSg} кг/м²) · Промерзание: {currentRegion.frostDepth} м · R_req={currentRegion.rReqWall}
+                  </div>
+                  <div className="text-sky-300" data-testid="sidebar-wind-summary">
+                    Ветер: {windAnalysis.windZone} р-н (w₀={windAnalysis.windPressureW0KgM2} кг/м², {windAnalysis.avgWindSpeedMs}–{windAnalysis.maxGustWindSpeedMs} м/с) · {windAnalysis.prevailingWindLabel}
                   </div>
                 </div>
               </div>
@@ -719,7 +725,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                 <p className="text-[10px] text-slate-400 leading-snug">
                   Базовое поле автоматически увеличивается пропорционально размерам участка ({formatMetersMm(plot.width)}×{formatMetersMm(plot.length)} м → {formatMetersMm(baseField.fieldWidth)}×{formatMetersMm(baseField.fieldLength)} м).
                 </p>
-                <div className="grid grid-cols-4 gap-1">
+                <div className="grid grid-cols-2 gap-1.5">
                   {[
                     { m: 2, label: '2× Поле' },
                     { m: 4, label: '4× (Стандарт)' },
@@ -738,7 +744,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                             baseFieldMultiplier: item.m
                           }))
                         }
-                        className={`py-1 px-1 text-[10px] font-mono rounded border transition-colors whitespace-nowrap ${
+                        className={`py-1.5 px-2 text-xs font-mono rounded border transition-colors text-center ${
                           activeM === item.m
                             ? 'bg-sky-600 text-white border-sky-400 font-semibold'
                             : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-slate-700'
@@ -871,7 +877,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                 </div>
               </div>
 
-              <div className="grid grid-cols-4 gap-1">
+              <div className="grid grid-cols-2 gap-1.5">
                 {[
                   {
                     id: 'flat',
@@ -922,7 +928,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                         }
                       }))
                     }
-                    className="py-1 px-1 text-[10px] font-mono rounded bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 whitespace-nowrap"
+                    className="py-1.5 px-2 text-xs font-mono rounded bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 text-center"
                   >
                     {preset.label}
                   </button>
@@ -2010,6 +2016,35 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                         className="w-28 accent-sky-500"
                       />
                     </div>
+
+                    {/* Wind Load on Fence Edge (СП 20.13330.2016 Раздел 11) */}
+                    {(() => {
+                      const fenceWind = windAnalysis.fences[idx];
+                      if (!fenceWind) return null;
+                      return (
+                        <div
+                          data-testid={`fence-wind-load-card-${idx}`}
+                          className="p-2 rounded bg-slate-900/90 border border-slate-800 text-[10px] space-y-1"
+                        >
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="text-sky-300 font-semibold flex items-center gap-1">
+                              <Wind className="w-3 h-3 text-sky-400 shrink-0" />
+                              Ветровая нагрузка ({windAnalysis.windZone} р-н):
+                            </span>
+                            <span className="font-mono text-white font-bold">
+                              {fenceWind.designWindPressureKgM2} кг/м²
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between text-slate-300 font-mono">
+                            <span>На столб (шаг 2.5м): {fenceWind.forcePerPostKgf} кгс</span>
+                            <span className="text-amber-300">M = {fenceWind.bendingMomentPerPostKnm} кН·м</span>
+                          </div>
+                          <div className="text-slate-400 leading-snug">
+                            Реком.: <span className="text-emerald-300">{fenceWind.recommendedPostSpec}</span> (заглубл. {fenceWind.recommendedEmbedmentM} м)
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     {edge.type === 'neighbor' &&
                       plot.category === 'SNT' &&

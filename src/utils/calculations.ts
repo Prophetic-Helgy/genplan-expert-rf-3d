@@ -34,7 +34,12 @@ import {
   PlotReliefConfig,
   PlotDrainageZone,
   PlotReliefAnalysis,
-  ObjectCategoryCapabilities
+  ObjectCategoryCapabilities,
+  WindDirection8,
+  WindRoseSectorItem,
+  BuildingWindLoadResult,
+  FenceWindLoadItem,
+  PlotWindAnalysis
 } from '../types';
 import {
   REGIONS_RF,
@@ -751,9 +756,13 @@ export function getObjectFootprintCorners(obj: SiteObject, useEffectiveOverhang 
  */
 export function calculateInteriorSunPatches(
   obj: SiteObject,
-  sunVecWorld: { x: number; y: number; z: number; altitudeDeg: number }
+  sunVecWorld: { x: number; y: number; z: number; altitudeDeg?: number },
+  includeAllFloors = false
 ): InteriorSunPatch[] {
-  if (sunVecWorld.altitudeDeg <= 2 || !isEnclosedBuildingCategory(obj.category)) {
+  const altDeg =
+    sunVecWorld.altitudeDeg ??
+    (Math.atan2(sunVecWorld.y, Math.hypot(sunVecWorld.x, sunVecWorld.z) || 1) * 180) / Math.PI;
+  if (altDeg <= 2 || !isEnclosedBuildingCategory(obj.category)) {
     return [];
   }
 
@@ -763,9 +772,20 @@ export function calculateInteriorSunPatches(
   const L = Math.max(1.2, obj.length);
   const hw = W / 2;
   const hl = L / 2;
-  const plinthH = Math.max(0.05, obj.plinthHeight ?? 0.35);
+  const floorsAbove = Math.max(1, Math.min(3, Math.round(obj.floors || 1)));
   const H_wall = computeTotalAboveGroundWallHeight(obj);
-  const bodyH = Math.max(1.0, H_wall - plinthH);
+  const plinthH = Math.min(
+    H_wall * 0.35,
+    Math.max(0.05, obj.plinthHeight ?? (obj.category === 'house' ? 0.45 : 0.30))
+  );
+  const bodyH = Math.max(0.4, H_wall - plinthH);
+  const rawSlabThick = Math.max(0.05, obj.interfloorSlabThickness ?? 0.22);
+  const slabThick =
+    floorsAbove > 1 ? Math.min(rawSlabThick, (bodyH * 0.2) / (floorsAbove - 1)) : 0;
+  const floorH =
+    floorsAbove > 1
+      ? Math.max(0.4, (bodyH - (floorsAbove - 1) * slabThick) / floorsAbove)
+      : bodyH;
 
   const rad = (obj.rotation * Math.PI) / 180;
   const cos = Math.cos(rad);
@@ -782,12 +802,8 @@ export function calculateInteriorSunPatches(
     z: szLocal / horizLen
   };
 
-  // Respect user-configured sillHeight and windowHeight
-  const floorY = plinthH + 0.04;
-  const sillOffset = Math.min(bodyH - 0.45, Math.max(0.1, wins.sillHeight ?? 0.85));
-  const reqWinH = Math.min(bodyH - sillOffset - 0.08, Math.max(0.4, wins.windowHeight ?? 1.3));
-  const sillY = plinthH + sillOffset;
-  const topY = sillY + reqWinH;
+  const floorY = plinthH + 0.045;
+  const storiesToCompute = includeAllFloors ? floorsAbove : 1;
 
   const patches: InteriorSunPatch[] = [];
 
@@ -803,121 +819,200 @@ export function calculateInteriorSunPatches(
     { facade: 'west', count: wins.west, normal: { x: -1, z: 0 }, spanLen: L }
   ];
 
-  const clampX = (x: number) => Math.max(-hw + 0.18, Math.min(hw - 0.18, x));
-  const clampZ = (z: number) => Math.max(-hl + 0.18, Math.min(hl - 0.18, z));
+  const clampX = (x: number) => Math.max(-hw + 0.24, Math.min(hw - 0.24, x));
+  const clampZ = (z: number) => Math.max(-hl + 0.24, Math.min(hl - 0.24, z));
 
-  for (const f of facades) {
-    if (f.count <= 0) continue;
-    const dot = f.normal.x * sunDirLocal.x + f.normal.z * sunDirLocal.z;
-    if (dot <= 0.06) continue;
+  for (let s = 0; s < storiesToCompute; s++) {
+    const storyBaseY = floorsAbove > 1 ? s * (floorH + slabThick) : 0;
+    const storySpanH =
+      floorsAbove > 1 ? Math.min(floorH, Math.max(0.8, bodyH - storyBaseY)) : bodyH;
+    const storyFloorY = plinthH + storyBaseY + (s === 0 ? 0.045 : 0.025);
 
-    const maxAllowedWinW = (f.spanLen * 0.82) / f.count;
-    const winWidth = Math.max(0.35, Math.min(maxAllowedWinW, wins.windowWidth ?? 1.3));
-    const shiftAlongWall = (wins.positionOffset ?? 0) * (f.spanLen * 0.35);
-    const maxCenter = Math.max(0, f.spanLen / 2 - winWidth / 2 - 0.15);
+    const sillOffset = Math.min(
+      storySpanH - 0.42,
+      Math.max(0.1, wins.sillHeight ?? 0.85)
+    );
+    const reqWinH = Math.min(
+      storySpanH - sillOffset - 0.08,
+      Math.max(0.35, wins.windowHeight ?? 1.3)
+    );
+    const sillLocalY = storyBaseY + sillOffset;
+    const topLocalY = Math.min(bodyH - 0.06, sillLocalY + reqWinH);
+    if (topLocalY <= sillLocalY + 0.2) continue;
 
-    for (let i = 0; i < f.count; i++) {
-      const baseOffset = ((i + 0.5) / f.count - 0.5) * (f.spanLen * 0.72) + shiftAlongWall;
-      const offsetAlongWall = Math.max(-maxCenter, Math.min(maxCenter, baseOffset));
-      const halfWin = winWidth / 2;
+    const sillY = plinthH + sillLocalY;
+    const topY = plinthH + topLocalY;
 
-      const tNear = Math.max(0.12, (sillY - floorY) / syLocal);
-      const tFar = Math.min(12.0, (topY - floorY) / syLocal);
+    for (const f of facades) {
+      if (f.count <= 0) continue;
+      const dot = f.normal.x * sunDirLocal.x + f.normal.z * sunDirLocal.z;
+      if (dot <= 0.06) continue;
 
-      const dxNear = -sxLocal * tNear;
-      const dzNear = -szLocal * tNear;
-      const dxFar = -sxLocal * tFar;
-      const dzFar = -szLocal * tFar;
+      const isWallAxisZ = f.facade === 'east' || f.facade === 'west';
+      const effWallSpan = isWallAxisZ ? Math.max(0.8, f.spanLen - 2 * 0.22 + 0.04) : f.spanLen;
+      const maxAllowedWinW = (effWallSpan * 0.82) / f.count;
+      const winWidth = Math.max(0.35, Math.min(maxAllowedWinW, wins.windowWidth ?? 1.3));
+      const shiftAlongWall = (wins.positionOffset ?? 0) * (effWallSpan * 0.35);
+      const maxCenter = Math.max(0, effWallSpan / 2 - winWidth / 2 - 0.12);
 
-      let winCorners3D: Array<{ x: number; y: number; z: number }> = [];
-      let rawFloorPoly: Point2D[] = [];
-      let centerLocal = { x: 0, y: (sillY + topY) / 2, z: 0 };
-
-      if (f.facade === 'south') {
-        const zWall = hl - 0.05;
-        const x1 = offsetAlongWall - halfWin;
-        const x2 = offsetAlongWall + halfWin;
-        centerLocal = { x: offsetAlongWall, y: (sillY + topY) / 2, z: zWall };
-        winCorners3D = [
-          { x: x1, y: sillY, z: zWall },
-          { x: x2, y: sillY, z: zWall },
-          { x: x2, y: topY, z: zWall },
-          { x: x1, y: topY, z: zWall }
-        ];
-        rawFloorPoly = [
-          { x: clampX(x1 + dxNear), z: clampZ(zWall + dzNear) },
-          { x: clampX(x2 + dxNear), z: clampZ(zWall + dzNear) },
-          { x: clampX(x2 + dxFar), z: clampZ(zWall + dzFar) },
-          { x: clampX(x1 + dxFar), z: clampZ(zWall + dzFar) }
-        ];
-      } else if (f.facade === 'north') {
-        const zWall = -hl + 0.05;
-        const x1 = offsetAlongWall - halfWin;
-        const x2 = offsetAlongWall + halfWin;
-        centerLocal = { x: offsetAlongWall, y: (sillY + topY) / 2, z: zWall };
-        winCorners3D = [
-          { x: x1, y: sillY, z: zWall },
-          { x: x2, y: sillY, z: zWall },
-          { x: x2, y: topY, z: zWall },
-          { x: x1, y: topY, z: zWall }
-        ];
-        rawFloorPoly = [
-          { x: clampX(x1 + dxNear), z: clampZ(zWall + dzNear) },
-          { x: clampX(x2 + dxNear), z: clampZ(zWall + dzNear) },
-          { x: clampX(x2 + dxFar), z: clampZ(zWall + dzFar) },
-          { x: clampX(x1 + dxFar), z: clampZ(zWall + dzFar) }
-        ];
-      } else if (f.facade === 'east') {
-        const xWall = hw - 0.05;
-        const z1 = offsetAlongWall - halfWin;
-        const z2 = offsetAlongWall + halfWin;
-        centerLocal = { x: xWall, y: (sillY + topY) / 2, z: offsetAlongWall };
-        winCorners3D = [
-          { x: xWall, y: sillY, z: z1 },
-          { x: xWall, y: sillY, z: z2 },
-          { x: xWall, y: topY, z: z2 },
-          { x: xWall, y: topY, z: z1 }
-        ];
-        rawFloorPoly = [
-          { x: clampX(xWall + dxNear), z: clampZ(z1 + dzNear) },
-          { x: clampX(xWall + dxNear), z: clampZ(z2 + dzNear) },
-          { x: clampX(xWall + dxFar), z: clampZ(z2 + dzFar) },
-          { x: clampX(xWall + dxFar), z: clampZ(z1 + dzFar) }
-        ];
-      } else {
-        const xWall = -hw + 0.05;
-        const z1 = offsetAlongWall - halfWin;
-        const z2 = offsetAlongWall + halfWin;
-        centerLocal = { x: xWall, y: (sillY + topY) / 2, z: offsetAlongWall };
-        winCorners3D = [
-          { x: xWall, y: sillY, z: z1 },
-          { x: xWall, y: sillY, z: z2 },
-          { x: xWall, y: topY, z: z2 },
-          { x: xWall, y: topY, z: z1 }
-        ];
-        rawFloorPoly = [
-          { x: clampX(xWall + dxNear), z: clampZ(z1 + dzNear) },
-          { x: clampX(xWall + dxNear), z: clampZ(z2 + dzNear) },
-          { x: clampX(xWall + dxFar), z: clampZ(z2 + dzFar) },
-          { x: clampX(xWall + dxFar), z: clampZ(z1 + dzFar) }
-        ];
+      // Compute ground-floor door intervals on this facade so ground-floor windows shift identically to 3D cutouts
+      const doorCountOnFacade =
+        f.facade === 'south'
+          ? doors.south
+          : f.facade === 'north'
+          ? doors.north
+          : f.facade === 'east'
+          ? doors.east
+          : doors.west;
+      const doorIntervals: Array<{ left: number; right: number; topY: number }> = [];
+      if (s === 0 && doorCountOnFacade > 0 && effWallSpan >= 1.0) {
+        const groundSpanH = floorsAbove > 1 ? Math.min(floorH, bodyH) : bodyH;
+        const maxAllowedDoorW = (effWallSpan * 0.78) / doorCountOnFacade;
+        const doorW = Math.max(0.5, Math.min(maxAllowedDoorW, doors.doorWidth ?? 0.95));
+        const threshY = Math.min(groundSpanH * 0.25, Math.max(0.0, doors.thresholdHeight ?? 0.05));
+        const reqDoorH = Math.min(groundSpanH - threshY - 0.06, Math.max(0.85, doors.doorHeight ?? 2.05));
+        const topDoorY = Math.min(bodyH - 0.05, threshY + reqDoorH);
+        const doorShift = (doors.positionOffset ?? 0) * (effWallSpan * 0.38);
+        const maxDoorCenter = Math.max(0, effWallSpan / 2 - doorW / 2 - 0.1);
+        for (let dIdx = 0; dIdx < doorCountOnFacade; dIdx++) {
+          const baseDoorCx =
+            (doorCountOnFacade === 1
+              ? 0
+              : ((dIdx + 0.5) / doorCountOnFacade - 0.5) * (effWallSpan * 0.65)) + doorShift;
+          const dCx = Math.max(-maxDoorCenter, Math.min(maxDoorCenter, baseDoorCx));
+          doorIntervals.push({ left: dCx - doorW / 2, right: dCx + doorW / 2, topY: topDoorY });
+        }
       }
 
-      patches.push({
-        facade: f.facade,
-        windowIndex: i,
-        windowCenterLocal: {
-          x: Number(centerLocal.x.toFixed(2)),
-          y: Number(centerLocal.y.toFixed(2)),
-          z: Number(centerLocal.z.toFixed(2))
-        },
-        windowCornersLocal3D: winCorners3D,
-        floorPolygonLocal: rawFloorPoly.map((p) => ({
-          x: Number(p.x.toFixed(2)),
-          z: Number(p.z.toFixed(2))
-        })),
-        intensity: Number(Math.min(1, dot * 1.25).toFixed(2))
-      });
+      for (let i = 0; i < f.count; i++) {
+        const baseOffset = ((i + 0.5) / f.count - 0.5) * (effWallSpan * 0.72) + shiftAlongWall;
+        let offsetAlongWall = Math.max(-maxCenter, Math.min(maxCenter, baseOffset));
+        const halfWin = winWidth / 2;
+
+        if (s === 0 && doorIntervals.length > 0 && includeAllFloors) {
+          const checkDoorOverlap = (candCx: number) => {
+            const cLeft = candCx - halfWin;
+            const cRight = candCx + halfWin;
+            return doorIntervals.find(
+              (dIv) =>
+                sillLocalY < dIv.topY + 0.06 &&
+                !(cRight + 0.08 <= dIv.left || cLeft - 0.08 >= dIv.right)
+            );
+          };
+          const hitDoor = checkDoorOverlap(offsetAlongWall);
+          if (hitDoor) {
+            const candRight = hitDoor.right + 0.12 + halfWin;
+            const candLeft = hitDoor.left - 0.12 - halfWin;
+            if (candRight <= maxCenter && !checkDoorOverlap(candRight)) {
+              offsetAlongWall = candRight;
+            } else if (candLeft >= -maxCenter && !checkDoorOverlap(candLeft)) {
+              offsetAlongWall = candLeft;
+            } else {
+              continue;
+            }
+          }
+        }
+
+        const tNear = Math.max(0.12, (sillY - storyFloorY) / syLocal);
+        const tFar = Math.min(12.0, (topY - storyFloorY) / syLocal);
+
+        const dxNear = -sxLocal * tNear;
+        const dzNear = -szLocal * tNear;
+        const dxFar = -sxLocal * tFar;
+        const dzFar = -szLocal * tFar;
+
+        let winCorners3D: Array<{ x: number; y: number; z: number }> = [];
+        let rawFloorPoly: Point2D[] = [];
+        let centerLocal = { x: 0, y: (sillY + topY) / 2, z: 0 };
+
+        if (f.facade === 'south') {
+          const zWall = hl - 0.05;
+          const x1 = offsetAlongWall - halfWin;
+          const x2 = offsetAlongWall + halfWin;
+          centerLocal = { x: offsetAlongWall, y: (sillY + topY) / 2, z: zWall };
+          winCorners3D = [
+            { x: x1, y: sillY, z: zWall },
+            { x: x2, y: sillY, z: zWall },
+            { x: x2, y: topY, z: zWall },
+            { x: x1, y: topY, z: zWall }
+          ];
+          rawFloorPoly = [
+            { x: clampX(x1 + dxNear), z: clampZ(zWall + dzNear) },
+            { x: clampX(x2 + dxNear), z: clampZ(zWall + dzNear) },
+            { x: clampX(x2 + dxFar), z: clampZ(zWall + dzFar) },
+            { x: clampX(x1 + dxFar), z: clampZ(zWall + dzFar) }
+          ];
+        } else if (f.facade === 'north') {
+          const zWall = -hl + 0.05;
+          const x1 = offsetAlongWall - halfWin;
+          const x2 = offsetAlongWall + halfWin;
+          centerLocal = { x: offsetAlongWall, y: (sillY + topY) / 2, z: zWall };
+          winCorners3D = [
+            { x: x1, y: sillY, z: zWall },
+            { x: x2, y: sillY, z: zWall },
+            { x: x2, y: topY, z: zWall },
+            { x: x1, y: topY, z: zWall }
+          ];
+          rawFloorPoly = [
+            { x: clampX(x1 + dxNear), z: clampZ(zWall + dzNear) },
+            { x: clampX(x2 + dxNear), z: clampZ(zWall + dzNear) },
+            { x: clampX(x2 + dxFar), z: clampZ(zWall + dzFar) },
+            { x: clampX(x1 + dxFar), z: clampZ(zWall + dzFar) }
+          ];
+        } else if (f.facade === 'east') {
+          const xWall = hw - 0.05;
+          const z1 = -offsetAlongWall - halfWin;
+          const z2 = -offsetAlongWall + halfWin;
+          centerLocal = { x: xWall, y: (sillY + topY) / 2, z: -offsetAlongWall };
+          winCorners3D = [
+            { x: xWall, y: sillY, z: z1 },
+            { x: xWall, y: sillY, z: z2 },
+            { x: xWall, y: topY, z: z2 },
+            { x: xWall, y: topY, z: z1 }
+          ];
+          rawFloorPoly = [
+            { x: clampX(xWall + dxNear), z: clampZ(z1 + dzNear) },
+            { x: clampX(xWall + dxNear), z: clampZ(z2 + dzNear) },
+            { x: clampX(xWall + dxFar), z: clampZ(z2 + dzFar) },
+            { x: clampX(xWall + dxFar), z: clampZ(z1 + dzFar) }
+          ];
+        } else {
+          const xWall = -hw + 0.05;
+          const z1 = -offsetAlongWall - halfWin;
+          const z2 = -offsetAlongWall + halfWin;
+          centerLocal = { x: xWall, y: (sillY + topY) / 2, z: -offsetAlongWall };
+          winCorners3D = [
+            { x: xWall, y: sillY, z: z1 },
+            { x: xWall, y: sillY, z: z2 },
+            { x: xWall, y: topY, z: z2 },
+            { x: xWall, y: topY, z: z1 }
+          ];
+          rawFloorPoly = [
+            { x: clampX(xWall + dxNear), z: clampZ(z1 + dzNear) },
+            { x: clampX(xWall + dxNear), z: clampZ(z2 + dzNear) },
+            { x: clampX(xWall + dxFar), z: clampZ(z2 + dzFar) },
+            { x: clampX(xWall + dxFar), z: clampZ(z1 + dzFar) }
+          ];
+        }
+
+        patches.push({
+          facade: f.facade,
+          windowIndex: i,
+          floorIndex: s,
+          floorElevationY: Number(storyFloorY.toFixed(3)),
+          windowCenterLocal: {
+            x: Number(centerLocal.x.toFixed(2)),
+            y: Number(centerLocal.y.toFixed(2)),
+            z: Number(centerLocal.z.toFixed(2))
+          },
+          windowCornersLocal3D: winCorners3D,
+          floorPolygonLocal: rawFloorPoly.map((p) => ({
+            x: Number(p.x.toFixed(2)),
+            z: Number(p.z.toFixed(2))
+          })),
+          intensity: Number(Math.min(1, dot * 1.25).toFixed(2))
+        });
+      }
     }
   }
 
@@ -4168,6 +4263,247 @@ export function calculatePlotReliefAndDrainage(
     drainageZones
   };
 }
+
+/**
+ * Calculates Regional Wind Rose, Wind Speeds, and Design Wind Loads on Buildings and Fences
+ * according to СП 20.13330.2016 Раздел 11 «Ветровые нагрузки» and СП 131.13330.2020 «Строительная климатология».
+ */
+export function calculateWindRoseAndLoads(
+  plot: PlotConfig,
+  objects: SiteObject[],
+  selectedObj?: SiteObject | null
+): PlotWindAnalysis {
+  const region = REGIONS_RF.find((r) => r.id === plot.regionId) || REGIONS_RF[0];
+  const w0Kg = region.windPressureW0KgM2 || 23;
+  const w0Pa = region.windPressureW0Pa || 230;
+  const gammaF = 1.4; // Коэффициент надежности по ветровой нагрузке (п. 11.1.12 СП 20.13330.2016)
+  const designW0KgM2 = Number((w0Kg * gammaF).toFixed(1));
+
+  const dirOrder: {
+    dir: WindDirection8;
+    shortRu: string;
+    labelRu: string;
+    azimuthDeg: number;
+  }[] = [
+    { dir: 'N', shortRu: 'С', labelRu: 'Северный (С)', azimuthDeg: 0 },
+    { dir: 'NE', shortRu: 'СВ', labelRu: 'Северо-Восточный (СВ)', azimuthDeg: 45 },
+    { dir: 'E', shortRu: 'В', labelRu: 'Восточный (В)', azimuthDeg: 90 },
+    { dir: 'SE', shortRu: 'ЮВ', labelRu: 'Юго-Восточный (ЮВ)', azimuthDeg: 135 },
+    { dir: 'S', shortRu: 'Ю', labelRu: 'Южный (Ю)', azimuthDeg: 180 },
+    { dir: 'SW', shortRu: 'ЮЗ', labelRu: 'Юго-Западный (ЮЗ)', azimuthDeg: 225 },
+    { dir: 'W', shortRu: 'З', labelRu: 'Западный (З)', azimuthDeg: 270 },
+    { dir: 'NW', shortRu: 'СЗ', labelRu: 'Северо-Западный (СЗ)', azimuthDeg: 315 }
+  ];
+
+  const northAngleDeg = Number.isFinite(plot.northAngle) ? plot.northAngle : 0;
+
+  const sectors: WindRoseSectorItem[] = dirOrder.map((d) => {
+    const freq = region.windRose?.[d.dir] ?? 12.5;
+    const plotAngleDeg = (d.azimuthDeg + northAngleDeg + 360) % 360;
+    return {
+      dir: d.dir,
+      labelRu: d.labelRu,
+      shortRu: d.shortRu,
+      azimuthDeg: d.azimuthDeg,
+      plotAngleDeg,
+      frequencyPercent: freq,
+      isPrevailing: d.dir === region.prevailingWindDir
+    };
+  });
+
+  const prevailingSector =
+    sectors.find((s) => s.isPrevailing) ||
+    sectors.slice().sort((a, b) => b.frequencyPercent - a.frequencyPercent)[0];
+
+  // Prevailing wind blows FROM prevailingSector.plotAngleDeg TOWARDS opposite direction (+180 deg)
+  // In plot coords: 0 deg = North (-Z), 90 deg = East (+X), 180 deg = South (+Z), 270 deg = West (-X)
+  const blowToAngleRad = (((prevailingSector.plotAngleDeg + 180) % 360) * Math.PI) / 180;
+  const prevailingPlotVector: Point2D = {
+    x: Number(Math.sin(blowToAngleRad).toFixed(3)),
+    z: Number((-Math.cos(blowToAngleRad)).toFixed(3))
+  };
+
+  // Pick target building (selected roofed building, or primary house, or first object)
+  const targetObj =
+    (selectedObj && isRoofedBuildingCategory(selectedObj.category) ? selectedObj : null) ||
+    objects.find((o) => o.category === 'house') ||
+    objects.find((o) => isRoofedBuildingCategory(o.category)) ||
+    selectedObj ||
+    objects[0];
+
+  const wallH = targetObj ? Math.max(2.2, targetObj.wallHeight || 3.0) : 6.0;
+  const ridgeH = targetObj ? Math.max(0, targetObj.roofHeight || 2.0) : 2.2;
+  const totalH = Number((wallH + ridgeH).toFixed(2));
+
+  // Height coefficient k(z_e) per Table 11.2 СП 20.13330.2016 for terrain type B (коттеджная застройка / лесистая местность):
+  // z <= 5m: k = 0.50; z = 10m: k = 0.65; z = 20m: k = 0.85
+  const kZe = Number(
+    (totalH <= 5
+      ? 0.5
+      : totalH <= 10
+        ? 0.5 + ((totalH - 5) / 5) * 0.15
+        : 0.65 + ((Math.min(20, totalH) - 10) / 10) * 0.2).toFixed(2)
+  );
+  // Gust factor (1 + zeta) for low-rise buildings in terrain B (~1.58..1.65)
+  const gustFactorGf = 1.62;
+
+  // Aerodynamic coefficients (Приложение В.1 СП 20.13330.2016):
+  // Наветренный фасад: c_e1 = +0.8; Подветренный фасад: c_e2 = -0.5; Суммарный лобовой c_x = 1.3
+  const ceWindward = 0.8;
+  const ceLeeward = 0.5;
+  const ceRoofUplift = 0.9; // Отрыв на карнизных свесах и коньке кровли
+
+  const windwardPressureKgM2 = Number((w0Kg * kZe * ceWindward * gustFactorGf * gammaF).toFixed(1));
+  const leewardSuctionKgM2 = Number((w0Kg * kZe * ceLeeward * gustFactorGf * gammaF).toFixed(1));
+  const roofUpliftPressureKgM2 = Number((w0Kg * kZe * ceRoofUplift * gustFactorGf * gammaF).toFixed(1));
+
+  const objW = targetObj ? Math.max(2, targetObj.width) : 10;
+  const objL = targetObj ? Math.max(2, targetObj.length) : 10;
+  const maxSpan = Math.max(objW, objL);
+  const windwardFacadeAreaSqm = Number((maxSpan * (wallH + ridgeH * 0.5)).toFixed(1));
+
+  const totalCombinedPressureKgM2 = windwardPressureKgM2 + leewardSuctionKgM2;
+  const totalHorizontalForceKgf = Math.round(totalCombinedPressureKgM2 * windwardFacadeAreaSqm);
+  const totalHorizontalForceKn = Number(((totalHorizontalForceKgf * 9.80665) / 1000).toFixed(2));
+  const leverArmM = Number((totalH * 0.52).toFixed(2));
+  const overturningMomentKnm = Number((totalHorizontalForceKn * leverArmM).toFixed(2));
+
+  const facadeLabelsByDir: Record<WindDirection8, string> = {
+    N: 'Северный фасад (наветренный)',
+    NE: 'Северо-Восточный угол и фасады С/В',
+    E: 'Восточный фасад (наветренный)',
+    SE: 'Юго-Восточный угол и фасады Ю/В',
+    S: 'Южный фасад (наветренный)',
+    SW: 'Юго-Западный угол и фасады Ю/З',
+    W: 'Западный фасад (наветренный)',
+    NW: 'Северо-Западный угол и фасады С/З'
+  };
+
+  const roofAnchorRecommendation =
+    roofUpliftPressureKgM2 >= 65
+      ? `Высокий ветровой отрыв на свесах кровли (${roofUpliftPressureKgM2} кг/м²): обязательно крепление мауэрлата шпильками М14 через армопояс с шагом ≤ 1.0 м и стальными ветровыми скобами/уголками KUU на каждом стропиле.`
+      : `Стандартная ветровая нагрузка на кровлю (${roofUpliftPressureKgM2} кг/м²): крепление мауэрлата анкерными шпильками М12 с шагом 1.2–1.5 м и фиксация стропил перфорированными уголками.`;
+
+  const selectedBuildingWind: BuildingWindLoadResult = {
+    objectId: targetObj?.id || 'house-1',
+    objectName: targetObj?.name || 'Жилой дом',
+    buildingTotalHeightM: totalH,
+    heightFactorKze: kZe,
+    gustFactorGf,
+    windwardPressureKgM2,
+    leewardSuctionKgM2,
+    roofUpliftPressureKgM2,
+    windwardFacadeAreaSqm,
+    totalHorizontalForceKn,
+    totalHorizontalForceKgf,
+    overturningMomentKnm,
+    mostLoadedFacadeLabel: facadeLabelsByDir[prevailingSector.dir],
+    roofAnchorRecommendation
+  };
+
+  // Calculate Wind Loads on Plot Fences (СП 20.13330.2016 п. 11.1.8, Приложение В.1.14 «Отдельно стоящие плоские стены и ограждения»)
+  const poly = generatePlotPolygon(plot);
+  const edgeDirNames = ['Северная граница (С)', 'Восточная граница (В)', 'Южная граница (Ю)', 'Западная граница (З)'];
+  const postStepM = 2.5; // Стандартный шаг столбов забора 2.5 м
+
+  const fences: FenceWindLoadItem[] = poly.map((p1, idx) => {
+    const p2 = poly[(idx + 1) % poly.length];
+    const edgeLengthM = Number(Math.hypot(p2.x - p1.x, p2.z - p1.z).toFixed(2));
+    const edgeCfg = plot.edges?.[idx] || {
+      type: idx === 2 ? 'red_line' : 'neighbor',
+      fenceType: idx === 2 ? 'solid' : 'mesh',
+      fenceHeight: idx === 2 ? 2.0 : 1.5
+    };
+    const fenceType = edgeCfg.fenceType || 'mesh';
+    const fenceHeightM = Number(Math.max(1.0, edgeCfg.fenceHeight || (fenceType === 'solid' ? 2.0 : 1.5)).toFixed(2));
+
+    // Сплошность полотна забора: глухой профлист φ = 1.0 (c_x = 1.4), сетка/3D-гиттер/штакетник φ = 0.28 (c_x = 1.2)
+    const fillFactorPhi = fenceType === 'solid' ? 1.0 : 0.28;
+    const aerodynamicCx = fenceType === 'solid' ? 1.4 : 1.2;
+    const kFence = 0.5; // До 5 м высоты в местности B
+    const gfFence = 1.58;
+
+    const designWindPressureKgM2 = Number(
+      (w0Kg * kFence * aerodynamicCx * fillFactorPhi * gfFence * gammaF).toFixed(1)
+    );
+    const areaPerPostSqm = fenceHeightM * postStepM;
+    const forcePerPostKgf = Math.round(designWindPressureKgM2 * areaPerPostSqm);
+    const forcePerPostKn = (forcePerPostKgf * 9.80665) / 1000;
+    // Изгибающий момент у уровня земли M = F * (H / 2)
+    const bendingMomentPerPostKnm = Number((forcePerPostKn * (fenceHeightM * 0.5)).toFixed(2));
+    const totalEdgeWindForceKn = Number(
+      (((designWindPressureKgM2 * fenceHeightM * edgeLengthM) * 9.80665) / 1000).toFixed(2)
+    );
+
+    let recommendedPostSpec = 'Профтруба 60×40×2 мм (шаг 2.5 м, 2 лаги 40×20 мм)';
+    let recommendedEmbedmentM = Math.max(0.9, Number((region.frostDepth * 0.75).toFixed(2)));
+    let status: FenceWindLoadItem['status'] = 'safe';
+    let statusLabel = 'В норме (низкая парусность)';
+
+    if (fenceType === 'solid') {
+      if (bendingMomentPerPostKnm >= 1.4 || w0Kg >= 48 || fenceHeightM >= 2.2) {
+        recommendedPostSpec = 'Усиленная профтруба 80×80×4 мм или винтовые сваи Ø76 (шаг 2.0 м, 3 лаги 40×25 мм)';
+        recommendedEmbedmentM = Math.max(1.4, Number((region.frostDepth + 0.1).toFixed(2)));
+        status = 'high_sail_warning';
+        statusLabel = 'Высокая парусность! Усиленные столбы 80×80';
+      } else {
+        recommendedPostSpec = 'Профтруба 60×60×3 мм (шаг 2.5 м, 2–3 лаги 40×20×2 мм)';
+        recommendedEmbedmentM = Math.max(1.2, Number((region.frostDepth * 0.95).toFixed(2)));
+        status = 'reinforced_required';
+        statusLabel = 'Сплошной парус — бетонирование ниже промерзания';
+      }
+    }
+
+    const edgeLabel = edgeDirNames[idx] || `Сторона #${idx + 1}`;
+    return {
+      edgeIndex: idx,
+      edgeLabel,
+      borderType: edgeCfg.type,
+      fenceType,
+      fenceHeightM,
+      edgeLengthM,
+      fillFactorPhi,
+      aerodynamicCx,
+      designWindPressureKgM2,
+      forcePerPostKgf,
+      bendingMomentPerPostKnm,
+      totalEdgeWindForceKn,
+      recommendedPostSpec,
+      recommendedEmbedmentM,
+      status,
+      statusLabel
+    };
+  });
+
+  const maxFenceMomentKnm = fences.reduce((m, f) => Math.max(m, f.bendingMomentPerPostKnm), 0);
+  const solidFencesCount = fences.filter((f) => f.fenceType === 'solid').length;
+
+  const summaryRecommendation =
+    solidFencesCount > 0
+      ? `Регион ${region.name} (${region.windZone} ветровой район, w₀ = ${w0Kg} кг/м², порывы до ${region.maxGustWindSpeedMs} м/с, господствующий ветер — ${region.prevailingWindLabel}). Для глухих заборов из профлиста крутящий момент на столб достигает ${maxFenceMomentKnm.toFixed(2)} кН·м — используйте столбы ${fences.find((f) => f.fenceType === 'solid')?.recommendedPostSpec || '60×60×3 мм'}. Входную группу дома рекомендуется размещать с подветренной стороны.`
+      : `Регион ${region.name} (${region.windZone} ветровой район, w₀ = ${w0Kg} кг/м², порывы до ${region.maxGustWindSpeedMs} м/с, господствующий ветер — ${region.prevailingWindLabel}). Продуваемые ограждения имеют минимальную парусность (момент до ${maxFenceMomentKnm.toFixed(2)} кН·м).`;
+
+  return {
+    regionId: region.id,
+    regionName: region.name,
+    windZone: region.windZone,
+    normCode: 'СП 20.13330.2016 Раздел 11 / СП 131.13330.2020',
+    windPressureW0Pa: w0Pa,
+    windPressureW0KgM2: w0Kg,
+    designWindPressureW0KgM2: designW0KgM2,
+    avgWindSpeedMs: region.avgWindSpeedMs,
+    maxGustWindSpeedMs: region.maxGustWindSpeedMs,
+    prevailingWindDir: region.prevailingWindDir,
+    prevailingWindLabel: region.prevailingWindLabel,
+    prevailingPlotVector,
+    sectors,
+    selectedBuildingWind,
+    fences,
+    maxFenceMomentKnm,
+    summaryRecommendation
+  };
+}
+
 
 
 

@@ -1,7 +1,5 @@
 import {
-  PROMO_VIDEO_RESOLUTIONS,
   PROMO_VIDEO_SCENES,
-  PROMO_VIDEO_TOTAL_DURATION_SEC,
   PromoSceneMetricPill,
   PromoVideoResolutionId,
   PromoVideoScene
@@ -194,6 +192,176 @@ export function drawFittedParagraphInBox(
   ctx.restore();
 }
 
+/**
+ * Draws a source canvas or image inside `(dstX, dstY, dstW, dstH)` using aspect-ratio `cover` scaling.
+ */
+function drawCanvasOrImageCover(
+  ctx: CanvasRenderingContext2D,
+  source: HTMLCanvasElement | HTMLImageElement,
+  srcW: number,
+  srcH: number,
+  dstX: number,
+  dstY: number,
+  dstW: number,
+  dstH: number
+) {
+  if (srcW <= 0 || srcH <= 0) return;
+  const srcRatio = srcW / srcH;
+  const dstRatio = dstW / dstH;
+  let drawW = dstW;
+  let drawH = dstH;
+  let drawX = dstX;
+  let drawY = dstY;
+
+  if (srcRatio > dstRatio) {
+    drawH = dstH;
+    drawW = dstH * srcRatio;
+    drawX = dstX - (drawW - dstW) / 2;
+  } else {
+    drawW = dstW;
+    drawH = dstW / srcRatio;
+    drawY = dstY - (drawH - dstH) / 2;
+  }
+
+  ctx.drawImage(source, drawX, drawY, drawW, drawH);
+}
+
+/**
+ * Draws scene-specific animated HUD telemetry badges over the live 3D WebGL / 2D CAD viewport
+ * without obstructing the central 3D model.
+ */
+function drawLiveViewportHudOverlays(
+  ctx: CanvasRenderingContext2D,
+  leftX: number,
+  stageY: number,
+  leftW: number,
+  stageH: number,
+  activeScene: PromoVideoScene,
+  prog: number
+) {
+  const is2D = activeScene.appAction.viewMode === '2d';
+
+  // Top-right Mode Indicator Pill
+  drawAutoSizedCanvasPill(ctx, {
+    x: leftX + leftW - 220,
+    y: stageY + 60,
+    height: 36,
+    maxWidth: 204,
+    text: is2D ? '2D ГЕНПЛАН CAD' : '3D СЦЕНА WEBGL',
+    fontPx: 14,
+    bgColor: is2D ? 'rgba(245, 158, 11, 0.92)' : 'rgba(14, 165, 233, 0.92)',
+    borderColor: is2D ? '#fde68a' : '#bae6fd',
+    textColor: '#020617',
+    radius: 9,
+    padX: 16
+  });
+
+  // Scene-specific animated telemetry callouts positioned around the edges of the 3D/2D viewport
+  if (activeScene.visualFocus === 'drag_and_drop_placement') {
+    const ease = prog * prog * (3 - 2 * prog);
+    const streetDistM = (3.4 + ease * 2.1).toFixed(2);
+    const neighborDistM = (1.9 + ease * 1.6).toFixed(2);
+    const isOk = Number(streetDistM) >= 5.0 && Number(neighborDistM) >= 3.0;
+
+    drawAutoSizedCanvasPill(ctx, {
+      x: leftX + 20,
+      y: stageY + 60,
+      height: 38,
+      maxWidth: 460,
+      text: `Красная линия: ${streetDistM} м (норма ≥ 5.0 м)`,
+      fontPx: 15,
+      fontFamily: 'JetBrains Mono, monospace',
+      bgColor: Number(streetDistM) >= 5.0 ? 'rgba(6, 78, 59, 0.92)' : 'rgba(127, 29, 29, 0.92)',
+      borderColor: Number(streetDistM) >= 5.0 ? '#10b981' : '#f43f5e',
+      textColor: '#ffffff',
+      radius: 10,
+      padX: 16
+    });
+
+    drawAutoSizedCanvasPill(ctx, {
+      x: leftX + 20,
+      y: stageY + 106,
+      height: 38,
+      maxWidth: 460,
+      text: `Межа соседа: ${neighborDistM} м — ${isOk ? 'В ЗЕЛЕНОЙ ЗОНЕ ✓' : 'ПЕРЕМЕЩЕНИЕ 3D ОБЪЕКТА...'}`,
+      fontPx: 15,
+      fontFamily: 'JetBrains Mono, monospace',
+      bgColor: isOk ? 'rgba(6, 78, 59, 0.92)' : 'rgba(120, 53, 15, 0.92)',
+      borderColor: isOk ? '#10b981' : '#f59e0b',
+      textColor: '#ffffff',
+      radius: 10,
+      padX: 16
+    });
+  } else if (activeScene.visualFocus === 'edit_dimensions_floors_roof_windows') {
+    const stepIdx = prog < 0.33 ? 0 : prog < 0.66 ? 1 : 2;
+    const stepLabels = [
+      'ШАГ 1/3: 8×9 м | 1 этаж | Двускатная крыша | 2 окна',
+      'ШАГ 2/3: 10×11 м | 2 этажа | Вальмовая крыша | 3 окна',
+      'ШАГ 3/3: 11×12 м | 3 этажа | Двускатная крыша | 4 окна'
+    ];
+    drawAutoSizedCanvasPill(ctx, {
+      x: leftX + 20,
+      y: stageY + 60,
+      height: 40,
+      maxWidth: leftW - 260,
+      text: stepLabels[stepIdx],
+      fontPx: 15,
+      bgColor: 'rgba(15, 23, 42, 0.92)',
+      borderColor: '#38bdf8',
+      textColor: '#bae6fd',
+      radius: 10,
+      padX: 18
+    });
+  } else if (activeScene.visualFocus === 'sun_insolation_xray') {
+    const animHour = 8.5 + prog * 9.5;
+    const hh = String(Math.floor(animHour)).padStart(2, '0');
+    const mm = String(Math.floor((animHour % 1) * 60)).padStart(2, '0');
+    drawAutoSizedCanvasPill(ctx, {
+      x: leftX + 20,
+      y: stageY + 60,
+      height: 40,
+      maxWidth: 520,
+      text: `☀ 21 ИЮНЯ — ${hh}:${mm} | 3D РЕНТГЕН СТЕН И ТЕНЕЙ`,
+      fontPx: 15,
+      fontFamily: 'JetBrains Mono, monospace',
+      bgColor: 'rgba(15, 23, 42, 0.92)',
+      borderColor: '#facc15',
+      textColor: '#fef08a',
+      radius: 10,
+      padX: 18
+    });
+  } else if (activeScene.visualFocus === 'relief_drainage_underground') {
+    drawAutoSizedCanvasPill(ctx, {
+      x: leftX + 20,
+      y: stageY + 60,
+      height: 40,
+      maxWidth: 620,
+      text: 'ПОДЗЕМНЫЙ 3D ВИД: ПОДВАЛ (−2.5 М) + ВОДОПРОВОД ПНД (−1.8 М)',
+      fontPx: 15,
+      bgColor: 'rgba(8, 47, 73, 0.92)',
+      borderColor: '#38bdf8',
+      textColor: '#e0f2fe',
+      radius: 10,
+      padX: 18
+    });
+  }
+
+  // Bottom HUD Normative Badge inside Left Stage
+  drawAutoSizedCanvasPill(ctx, {
+    x: leftX + 20,
+    y: stageY + stageH - 60,
+    height: 42,
+    maxWidth: leftW - 40,
+    text: `Нормативная база: ${activeScene.normativeCode}`,
+    fontPx: 15,
+    bgColor: 'rgba(15, 23, 42, 0.92)',
+    borderColor: '#38bdf8',
+    textColor: '#e0f2fe',
+    radius: 10,
+    padX: 18
+  });
+}
+
 export interface PromoCanvasRenderParams {
   ctx: CanvasRenderingContext2D;
   canvasWidth: number;
@@ -209,7 +377,8 @@ export interface PromoCanvasRenderParams {
 
 /**
  * Renders a broadcast-quality 16:9 frame at Full HD (1920x1080), 2K (2560x1440), or 4K (3840x2160)
- * using a virtual 1920x1080 coordinate system with strict clipping and auto-sized plaques.
+ * using the live Three.js 3D WebGL renderer (`window.__renderLiveViewportCanvasForPromo`) for 3D scenes
+ * and the live 2D CAD Blueprint canvas for 2D scenes, with NO top header plaque.
  */
 export function renderPromoVideoFrameOnCanvas({
   ctx,
@@ -228,10 +397,13 @@ export function renderPromoVideoFrameOnCanvas({
   const VH = 1080;
   const scaleX = canvasWidth / VW;
   const scaleY = canvasHeight / VH;
-  const prog = sceneLocalProgress01;
-  const resSpec = PROMO_VIDEO_RESOLUTIONS[resolutionId] || PROMO_VIDEO_RESOLUTIONS['1080p'];
+  const prog = Math.max(0, Math.min(1, sceneLocalProgress01 || 0));
+
+  void resolutionId;
 
   ctx.save();
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
   ctx.clearRect(0, 0, canvasWidth, canvasHeight);
   ctx.scale(scaleX, scaleY);
 
@@ -260,132 +432,74 @@ export function renderPromoVideoFrameOnCanvas({
     ctx.stroke();
   }
 
-  // 3. Top Broadcast Header Bar (Y: 24..108, H: 84)
-  const topX = 42;
-  const topY = 24;
-  const topW = VW - 84;
-  const topH = 84;
-
-  ctx.save();
-  drawRoundedRect(ctx, topX, topY, topW, topH, 16);
-  ctx.fillStyle = 'rgba(15, 23, 42, 0.94)';
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(56, 189, 248, 0.38)';
-  ctx.lineWidth = 2;
-  ctx.stroke();
-  ctx.clip();
-
-  // Brand badge on left
-  const brandW = drawAutoSizedCanvasPill(ctx, {
-    x: topX + 20,
-    y: topY + 16,
-    height: 52,
-    maxWidth: 360,
-    text: 'ГЕНПЛАН-ЭКСПЕРТ РФ 3D',
-    fontPx: 20,
-    bgColor: '#0284c7',
-    textColor: '#ffffff',
-    radius: 12,
-    padX: 24
-  });
-
-  // Resolution badge + Timecode on right
-  const formatSec = (s: number) => {
-    const mins = Math.floor(s / 60);
-    const secs = Math.floor(s % 60);
-    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
-  };
-  const timeText = `${formatSec(elapsedSec)} / ${formatSec(PROMO_VIDEO_TOTAL_DURATION_SEC)}`;
-
-  drawAutoSizedCanvasPill(ctx, {
-    x: topX + topW - 210,
-    y: topY + 16,
-    height: 52,
-    maxWidth: 190,
-    text: timeText,
-    fontPx: 19,
-    fontFamily: 'JetBrains Mono, monospace',
-    bgColor: 'rgba(2, 6, 23, 0.9)',
-    borderColor: 'rgba(148, 163, 184, 0.35)',
-    textColor: '#f8fafc',
-    radius: 12,
-    padX: 20
-  });
-
-  drawAutoSizedCanvasPill(ctx, {
-    x: topX + topW - 495,
-    y: topY + 16,
-    height: 52,
-    maxWidth: 270,
-    text: resSpec.badge,
-    fontPx: 16,
-    fontFamily: 'JetBrains Mono, monospace',
-    bgColor: 'rgba(16, 185, 129, 0.18)',
-    borderColor: 'rgba(16, 185, 129, 0.55)',
-    textColor: '#6ee7b7',
-    radius: 12,
-    padX: 18
-  });
-
-  // Scene Kicker & Normative Code in center-left (strictly fitted between brand badge and resolution badge)
-  const kickerX = topX + 38 + brandW;
-  const kickerMaxW = topX + topW - 515 - kickerX;
-  ctx.fillStyle = '#38bdf8';
-  drawSingleLineFittedText(ctx, activeScene.kicker, kickerX, topY + 30, kickerMaxW, 19, 'bold');
-  ctx.fillStyle = '#94a3b8';
-  drawSingleLineFittedText(
-    ctx,
-    `Нормативная база: ${activeScene.normativeCode}`,
-    kickerX,
-    topY + 58,
-    kickerMaxW,
-    17,
-    '600'
-  );
-  ctx.restore();
-
-  // 4. Headline & Subheadline Banner (Y: 126..216)
+  // 3. Headline & Subheadline Banner at Top (Y: 36..108 — NO top plaque with app title, scene number, or resolution)
   ctx.fillStyle = '#ffffff';
-  drawSingleLineFittedText(ctx, activeScene.headline, 46, 154, VW - 92, 36, 'bold');
+  drawSingleLineFittedText(ctx, activeScene.headline, 46, 52, VW - 92, 38, 'bold');
   ctx.fillStyle = '#94a3b8';
-  drawSingleLineFittedText(ctx, activeScene.subheadline, 46, 194, VW - 92, 22, 'normal');
+  drawSingleLineFittedText(ctx, activeScene.subheadline, 46, 94, VW - 92, 22, 'normal');
 
-  // 5. Main Stage Split (Y: 224..714, H: 490)
-  // Left Stage (X: 42..1112, W: 1070) -> Live App Viewport Frame + Callout HUD
+  // 4. Main Stage Split (Y: 122..710, H: 588)
+  // Left Stage (X: 42..1112, W: 1070) -> Real Live Three.js 3D WebGL Scene or 2D CAD Blueprint Viewport
   // Right Stage (X: 1134..1878, W: 744) -> Animated Engineering Infographic & Live Telemetry
-  const stageY = 224;
-  const stageH = 490;
+  const stageY = 122;
+  const stageH = 588;
   const leftX = 42;
   const leftW = 1070;
   const rightX = 1134;
   const rightW = 744;
 
-  // 5A. Left Stage: Live Application Viewport Window
+  // 4A. Left Stage: Real Three.js 3D WebGL Scene (for '3d' scenes) or Real 2D CAD Blueprint (for '2d' scenes)
   ctx.save();
   drawRoundedRect(ctx, leftX, stageY, leftW, stageH, 20);
-  ctx.fillStyle = '#09101f';
+  ctx.fillStyle = '#0f172a';
   ctx.fill();
   ctx.clip();
 
-  if (liveSnapshotImg && liveSnapshotImg.complete && liveSnapshotImg.naturalWidth > 0) {
-    const zoom = 1.02 + Math.sin(prog * Math.PI) * 0.035;
-    const drawW = leftW * zoom;
-    const drawH = stageH * zoom;
-    const drawX = leftX - (drawW - leftW) / 2;
-    const drawY = stageY - (drawH - stageH) / 2;
-    ctx.drawImage(liveSnapshotImg, drawX, drawY, drawW, drawH);
+  const liveViewportCanvas =
+    typeof window !== 'undefined'
+      ? (
+          window as unknown as {
+            __renderLiveViewportCanvasForPromo?: (opts: {
+              sceneId: string;
+              viewMode: '3d' | '2d';
+              sceneLocalProgress01: number;
+              appAction?: PromoVideoScene['appAction'];
+            }) => HTMLCanvasElement | null;
+          }
+        ).__renderLiveViewportCanvasForPromo?.({
+          sceneId: activeScene.visualFocus,
+          viewMode: activeScene.appAction.viewMode,
+          sceneLocalProgress01: prog,
+          appAction: activeScene.appAction
+        }) ?? null
+      : null;
 
-    const vig = ctx.createLinearGradient(0, stageY, 0, stageY + stageH);
-    vig.addColorStop(0, 'rgba(2, 6, 23, 0.5)');
-    vig.addColorStop(0.22, 'rgba(2, 6, 23, 0.05)');
-    vig.addColorStop(0.75, 'rgba(2, 6, 23, 0.08)');
-    vig.addColorStop(1, 'rgba(2, 6, 23, 0.72)');
-    ctx.fillStyle = vig;
-    ctx.fillRect(leftX, stageY, leftW, stageH);
+  if (liveViewportCanvas && liveViewportCanvas.width > 0 && liveViewportCanvas.height > 0) {
+    drawCanvasOrImageCover(
+      ctx,
+      liveViewportCanvas,
+      liveViewportCanvas.width,
+      liveViewportCanvas.height,
+      leftX,
+      stageY + 48,
+      leftW,
+      stageH - 48
+    );
+  } else if (liveSnapshotImg && liveSnapshotImg.width > 0 && liveSnapshotImg.height > 0) {
+    drawCanvasOrImageCover(
+      ctx,
+      liveSnapshotImg,
+      liveSnapshotImg.width,
+      liveSnapshotImg.height,
+      leftX,
+      stageY + 48,
+      leftW,
+      stageH - 48
+    );
   }
 
   // Live Workspace Window Top Chrome Bar
-  ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.94)';
   ctx.fillRect(leftX, stageY, leftW, 48);
   ctx.fillStyle = '#22c55e';
   ctx.beginPath();
@@ -394,182 +508,29 @@ export function renderPromoVideoFrameOnCanvas({
 
   const modeLabel =
     activeScene.appAction.viewMode === '2d'
-      ? 'ЖИВОЙ ВИД ПРОГРАММЫ: 2D ЧЕРТЕЖ ОТСТУПОВ И ГРАНИЦ'
+      ? 'РЕЖИМ 2D ЧЕРТЕЖА: НОРМАТИВНЫЕ ОТСТУПЫ И ГРАНИЦЫ УЧАСТКА'
       : activeScene.appAction.thermalHeatmapMode
-        ? 'ЖИВОЙ ВИД ПРОГРАММЫ: 3D ТЕПЛОВИЗОР ФАСАДОВ ЗДАНИЯ'
+        ? 'РЕЖИМ 3D СЦЕНЫ: ТЕПЛОВИЗОР ФАСАДОВ И ОКОН ЗДАНИЯ'
         : activeScene.appAction.xrayWallsMode
-          ? 'ЖИВОЙ ВИД ПРОГРАММЫ: 3D РЕНТГЕН СТЕН + СВЕТОВОЕ ПЯТНО'
+          ? 'РЕЖИМ 3D СЦЕНЫ: РЕНТГЕН СТЕН + ХОД СОЛНЦА И СВЕТОВОЕ ПЯТНО'
           : activeScene.appAction.undergroundViewMode
-            ? 'ЖИВОЙ ВИД ПРОГРАММЫ: 3D РЕЛЬЕФ, ДРЕНАЖ И ПОДЗЕМНЫЕ СЕТИ'
-            : 'ЖИВОЙ ВИД ПРОГРАММЫ: ИНТЕРАКТИВНЫЙ 3D ГЕНПЛАН УЧАСТКА';
+            ? 'РЕЖИМ 3D СЦЕНЫ: ПОДЗЕМНЫЙ РАЗРЕЗ (ПОДВАЛ, ТРУБЫ И ДРЕНАЖ)'
+            : 'РЕЖИМ 3D СЦЕНЫ: ИНТЕРАКТИВНОЕ 3D МОДЕЛИРОВАНИЕ УЧАСТКА';
   ctx.fillStyle = '#e2e8f0';
   drawSingleLineFittedText(ctx, modeLabel, leftX + 46, stageY + 24, leftW - 70, 17, 'bold');
 
-  // Animated Radar / Laser Scan Line across the viewport
-  const scanY = stageY + 52 + ((prog * 1.3) % 1) * (stageH - 64);
-  const scanGrad = ctx.createLinearGradient(leftX, scanY - 18, leftX, scanY + 3);
-  scanGrad.addColorStop(0, 'rgba(56, 189, 248, 0)');
-  scanGrad.addColorStop(1, 'rgba(56, 189, 248, 0.32)');
-  ctx.fillStyle = scanGrad;
-  ctx.fillRect(leftX, scanY - 18, leftW, 21);
-
-  // Scene-specific animated vector callouts overlaid on the live viewport (using auto-sized pills so text NEVER overflows!)
-  const cx = leftX + leftW * 0.5;
-  const cy = stageY + stageH * 0.54;
-
-  if (activeScene.visualFocus === 'site_3d_precision') {
-    ctx.strokeStyle = '#38bdf8';
-    ctx.lineWidth = 3;
-    ctx.setLineDash([10, 6]);
-    ctx.strokeRect(cx - 210, cy - 110, 420, 220);
-    ctx.setLineDash([]);
-
-    drawAutoSizedCanvasPill(ctx, {
-      x: cx,
-      y: stageY + stageH - 68,
-      height: 48,
-      maxWidth: leftW - 60,
-      text: 'ТОЧНОСТЬ ВВОДА: 28,000 × 36,000 м (ШАГ 1 ММ = 0.001 М)',
-      fontPx: 18,
-      fontFamily: 'JetBrains Mono, monospace',
-      bgColor: 'rgba(2, 132, 199, 0.95)',
-      borderColor: 'rgba(186, 230, 253, 0.7)',
-      textColor: '#ffffff',
-      radius: 12,
-      padX: 26,
-      align: 'center'
-    });
-  } else if (activeScene.visualFocus === 'normative_setbacks_2d') {
-    ctx.strokeStyle = '#ef4444';
-    ctx.lineWidth = 3.5;
-    ctx.beginPath();
-    ctx.moveTo(leftX + 100, cy);
-    ctx.lineTo(cx - 80, cy);
-    ctx.stroke();
-
-    drawAutoSizedCanvasPill(ctx, {
-      x: cx,
-      y: stageY + stageH - 68,
-      height: 48,
-      maxWidth: leftW - 60,
-      text: 'КОНТРОЛЬ НОРМ: 5.0 м от улицы · 3.0 м от соседа · Свес > 0.5 м = по кровле',
-      fontPx: 18,
-      bgColor: 'rgba(185, 28, 28, 0.94)',
-      borderColor: 'rgba(254, 202, 202, 0.6)',
-      textColor: '#ffffff',
-      radius: 12,
-      padX: 26,
-      align: 'center'
-    });
-  } else if (activeScene.visualFocus === 'sun_insolation_xray') {
-    const sunAngle = -Math.PI * 0.82 + prog * Math.PI * 0.64;
-    const sunX = cx + Math.cos(sunAngle) * 310;
-    const sunY = cy + 60 + Math.sin(sunAngle) * 185;
-
-    ctx.strokeStyle = 'rgba(250, 204, 21, 0.45)';
-    ctx.lineWidth = 3;
-    ctx.setLineDash([12, 8]);
-    ctx.beginPath();
-    ctx.arc(cx, cy + 60, 310, -Math.PI * 0.85, -Math.PI * 0.15);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    const rayGrad = ctx.createLinearGradient(sunX, sunY, cx, cy);
-    rayGrad.addColorStop(0, 'rgba(250, 204, 21, 0.85)');
-    rayGrad.addColorStop(1, 'rgba(250, 204, 21, 0.12)');
-    ctx.strokeStyle = rayGrad;
-    ctx.lineWidth = 26;
-    ctx.beginPath();
-    ctx.moveTo(sunX, sunY);
-    ctx.lineTo(cx, cy);
-    ctx.stroke();
-
-    ctx.fillStyle = '#facc15';
-    ctx.beginPath();
-    ctx.arc(sunX, sunY, 22, 0, Math.PI * 2);
-    ctx.fill();
-
-    drawAutoSizedCanvasPill(ctx, {
-      x: cx,
-      y: stageY + stageH - 68,
-      height: 48,
-      maxWidth: leftW - 60,
-      text: 'САНПИН 1.2.3685-21: Рентген стен + траектория светового пятна на полу',
-      fontPx: 18,
-      bgColor: 'rgba(180, 83, 9, 0.94)',
-      borderColor: 'rgba(253, 224, 71, 0.65)',
-      textColor: '#ffffff',
-      radius: 12,
-      padX: 26,
-      align: 'center'
-    });
-  } else if (activeScene.visualFocus === 'thermal_heatmap_energy') {
-    const legendW = 620;
-    const legendX = leftX + 28;
-    const legendY = stageY + stageH - 70;
-    ctx.save();
-    drawRoundedRect(ctx, legendX, legendY, legendW, 50, 12);
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.94)';
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(249, 115, 22, 0.6)';
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-    ctx.clip();
-
-    const thGrad = ctx.createLinearGradient(legendX + 20, 0, legendX + 240, 0);
-    thGrad.addColorStop(0, '#22c55e');
-    thGrad.addColorStop(0.5, '#f59e0b');
-    thGrad.addColorStop(1, '#ef4444');
-    ctx.fillStyle = thGrad;
-    ctx.fillRect(legendX + 20, legendY + 18, 220, 14);
-
-    ctx.fillStyle = '#f8fafc';
-    drawSingleLineFittedText(
-      ctx,
-      'Шкала Вт/м²: Норма → Мостики холода',
-      legendX + 258,
-      legendY + 25,
-      legendW - 274,
-      17,
-      'bold'
-    );
-    ctx.restore();
-  } else if (activeScene.visualFocus === 'relief_drainage_underground') {
-    ctx.strokeStyle = '#06b6d4';
-    ctx.lineWidth = 3.5;
-    for (let i = 0; i < 4; i++) {
-      const ax = leftX + 180 + i * 200;
-      const ay = stageY + 140 + ((prog * 120 + i * 30) % 200);
-      ctx.beginPath();
-      ctx.moveTo(ax, ay);
-      ctx.lineTo(ax + 42, ay + 42);
-      ctx.stroke();
-    }
-    drawAutoSizedCanvasPill(ctx, {
-      x: cx,
-      y: stageY + stageH - 68,
-      height: 48,
-      maxWidth: leftW - 60,
-      text: 'РЕЛЬЕФ И СЕТИ: Уклон участка + ливневый дренаж + трубы ниже промерзания',
-      fontPx: 18,
-      bgColor: 'rgba(8, 145, 178, 0.94)',
-      borderColor: 'rgba(165, 243, 252, 0.65)',
-      textColor: '#ffffff',
-      radius: 12,
-      padX: 26,
-      align: 'center'
-    });
-  }
+  // Scene-specific HUD badges and bottom callout plaques over the live 3D/2D viewport
+  drawLiveViewportHudOverlays(ctx, leftX, stageY, leftW, stageH, activeScene, prog);
 
   ctx.restore();
 
   // Border around Left Stage
   drawRoundedRect(ctx, leftX, stageY, leftW, stageH, 20);
-  ctx.strokeStyle = 'rgba(56, 189, 248, 0.42)';
+  ctx.strokeStyle = 'rgba(56, 189, 248, 0.45)';
   ctx.lineWidth = 2;
   ctx.stroke();
 
-  // 5B. Right Stage: Scene-Specific Animated Engineering Diagram + Live Project Telemetry
+  // 4B. Right Stage: Scene-Specific Animated Engineering Diagram + Live Project Telemetry
   ctx.save();
   drawRoundedRect(ctx, rightX, stageY, rightW, stageH, 20);
   ctx.fillStyle = 'rgba(15, 23, 42, 0.94)';
@@ -584,22 +545,22 @@ export function renderPromoVideoFrameOnCanvas({
     ctx,
     'ЖИВЫЕ РАСЧЕТЫ ПРОЕКТА И ИНЖЕНЕРНАЯ СХЕМА',
     rightX + 28,
-    stageY + 34,
+    stageY + 36,
     rightW - 56,
-    18,
+    19,
     'bold'
   );
 
   // Draw the 3 live metric cards at top of Right Stage (strictly clipped inside each card)
   liveMetrics.forEach((m, idx) => {
     const cardX = rightX + 24;
-    const cardY = stageY + 62 + idx * 80;
+    const cardY = stageY + 68 + idx * 88;
     const cardW = rightW - 48;
-    const cardH = 68;
+    const cardH = 74;
 
     ctx.save();
     drawRoundedRect(ctx, cardX, cardY, cardW, cardH, 14);
-    ctx.fillStyle = 'rgba(2, 6, 23, 0.82)';
+    ctx.fillStyle = 'rgba(2, 6, 23, 0.84)';
     ctx.fill();
     const borderCol =
       m.accent === 'emerald'
@@ -642,44 +603,127 @@ export function renderPromoVideoFrameOnCanvas({
     ctx.restore();
   });
 
-  // Interactive animated schematic box at bottom of Right Stage (Y: stageY + 306 .. stageY + 468)
+  // Interactive animated schematic box at bottom of Right Stage
   const diagX = rightX + 24;
-  const diagY = stageY + 306;
+  const diagY = stageY + 340;
   const diagW = rightW - 48;
-  const diagH = 160;
+  const diagH = 224;
 
   ctx.save();
   drawRoundedRect(ctx, diagX, diagY, diagW, diagH, 14);
   ctx.fillStyle = 'rgba(2, 6, 23, 0.92)';
   ctx.fill();
-  ctx.strokeStyle = 'rgba(56, 189, 248, 0.3)';
+  ctx.strokeStyle = 'rgba(56, 189, 248, 0.32)';
   ctx.lineWidth = 1.5;
   ctx.stroke();
   ctx.clip();
 
-  if (activeScene.visualFocus === 'roof_snow_foundation') {
+  if (activeScene.visualFocus === 'drag_and_drop_placement') {
+    const tx = diagX + 24;
+    const tw = diagW - 48;
+    ctx.fillStyle = '#38bdf8';
+    drawSingleLineFittedText(ctx, 'ИНТЕРАКТИВНОЕ 3D РАЗМЕЩЕНИЕ НА УЧАСТКЕ:', tx, diagY + 42, tw, 19, 'bold');
+    ctx.fillStyle = '#e2e8f0';
+    drawSingleLineFittedText(
+      ctx,
+      '• Свободное перетаскивание дома, бани, гаража и скважины в 3D и 2D',
+      tx,
+      diagY + 88,
+      tw,
+      17,
+      'normal'
+    );
+    drawSingleLineFittedText(
+      ctx,
+      '• Живой контроль дистанций до красной линии улицы и межи соседей',
+      tx,
+      diagY + 132,
+      tw,
+      17,
+      'normal'
+    );
+    drawSingleLineFittedText(
+      ctx,
+      '• Мгновенная индикация зеленых разрешенных зон застройки',
+      tx,
+      diagY + 176,
+      tw,
+      17,
+      'normal'
+    );
+  } else if (activeScene.visualFocus === 'edit_dimensions_floors_roof_windows') {
+    const stepIdx = Math.min(2, Math.floor(prog * 3));
+    const flCount = stepIdx + 1;
+    const bX = diagX + 36;
+    const bW = 152;
+    const flH = 34;
+    const baseLineY = diagY + 172;
+    const totalWallH = flCount * flH;
+
+    // Basement box below ground line
+    ctx.fillStyle = 'rgba(14, 165, 233, 0.35)';
+    ctx.strokeStyle = '#38bdf8';
+    ctx.lineWidth = 2;
+    ctx.fillRect(bX, baseLineY, bW, 28);
+    ctx.strokeRect(bX, baseLineY, bW, 28);
+
+    // Above-ground floors
+    ctx.fillStyle = 'rgba(51, 65, 85, 0.85)';
+    ctx.fillRect(bX, baseLineY - totalWallH, bW, totalWallH);
+    ctx.strokeRect(bX, baseLineY - totalWallH, bW, totalWallH);
+
+    // Windows on each floor
+    ctx.fillStyle = '#fef08a';
+    const wCols = stepIdx + 2;
+    for (let f = 0; f < flCount; f++) {
+      for (let w = 0; w < wCols; w++) {
+        const wx = bX + 14 + (w * (bW - 34)) / Math.max(1, wCols);
+        const wy = baseLineY - (f + 1) * flH + 8;
+        ctx.fillRect(wx, wy, 18, 18);
+      }
+    }
+
+    // Animated roof on top
+    ctx.strokeStyle = '#f59e0b';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(bX - 10, baseLineY - totalWallH);
+    ctx.lineTo(bX + bW / 2, baseLineY - totalWallH - 32);
+    ctx.lineTo(bX + bW + 10, baseLineY - totalWallH);
+    ctx.closePath();
+    ctx.stroke();
+
+    const tx = diagX + 216;
+    const tw = diagW - 234;
+    ctx.fillStyle = '#f8fafc';
+    drawSingleLineFittedText(ctx, `Этажность: ${flCount} эт. + Подземный этаж`, tx, diagY + 56, tw, 19, 'bold');
+    ctx.fillStyle = '#38bdf8';
+    drawSingleLineFittedText(ctx, '4 формы крыши: Плоская, Скатная, Двускатная, Вальма', tx, diagY + 108, tw, 17, 'bold');
+    ctx.fillStyle = '#cbd5e1';
+    drawSingleLineFittedText(ctx, `Окна по фасадам: ${wCols} шт./эт. (ПВХ и дерево)`, tx, diagY + 158, tw, 17, 'normal');
+  } else if (activeScene.visualFocus === 'roof_snow_foundation') {
     const pitchDeg = Math.round(18 + Math.sin(prog * Math.PI * 2) * 14);
     const muVal =
       pitchDeg <= 30 ? '1.00' : pitchDeg >= 60 ? '0.00' : ((60 - pitchDeg) / 30).toFixed(2);
     ctx.strokeStyle = '#38bdf8';
     ctx.lineWidth = 3.5;
-    const triBaseY = diagY + 124;
-    const triPeakY = triBaseY - Math.tan((pitchDeg * Math.PI) / 180) * 82;
+    const triBaseY = diagY + 168;
+    const triPeakY = triBaseY - Math.tan((pitchDeg * Math.PI) / 180) * 92;
     ctx.beginPath();
     ctx.moveTo(diagX + 36, triBaseY);
-    ctx.lineTo(diagX + 130, Math.max(diagY + 24, triPeakY));
-    ctx.lineTo(diagX + 224, triBaseY);
+    ctx.lineTo(diagX + 132, Math.max(diagY + 28, triPeakY));
+    ctx.lineTo(diagX + 228, triBaseY);
     ctx.closePath();
     ctx.stroke();
 
-    const textStartX = diagX + 250;
-    const textMaxW = diagW - 268;
+    const textStartX = diagX + 254;
+    const textMaxW = diagW - 272;
     ctx.fillStyle = '#f8fafc';
     drawSingleLineFittedText(
       ctx,
-      `Динамика угла ската крыши: α = ${pitchDeg}°`,
+      `Роза ветров + Угол ската крыши: α = ${pitchDeg}°`,
       textStartX,
-      diagY + 46,
+      diagY + 62,
       textMaxW,
       19,
       'bold'
@@ -687,9 +731,9 @@ export function renderPromoVideoFrameOnCanvas({
     ctx.fillStyle = '#38bdf8';
     drawSingleLineFittedText(
       ctx,
-      `Коэффициент сноса снега μ = ${muVal}`,
+      `Коэффициент снега μ = ${muVal} + Ветровой отрыв`,
       textStartX,
-      diagY + 82,
+      diagY + 112,
       textMaxW,
       18,
       'bold',
@@ -698,9 +742,9 @@ export function renderPromoVideoFrameOnCanvas({
     ctx.fillStyle = '#94a3b8';
     drawSingleLineFittedText(
       ctx,
-      'Стены подрезаются под скаты без пробития кровли',
+      'Расчет ветровой нагрузки на дом и столбы забора по СП 20.13330',
       textStartX,
-      diagY + 118,
+      diagY + 162,
       textMaxW,
       16,
       'normal'
@@ -712,19 +756,19 @@ export function renderPromoVideoFrameOnCanvas({
       { label: 'ПВХ 2-кам. + PIR', loss: 0.28, col: '#10b981' }
     ];
     bars.forEach((b, i) => {
-      const by = diagY + 26 + i * 42;
+      const by = diagY + 38 + i * 56;
       ctx.fillStyle = '#cbd5e1';
-      drawSingleLineFittedText(ctx, b.label, diagX + 22, by + 12, 180, 16, '600');
-      drawRoundedRect(ctx, diagX + 215, by + 2, (diagW - 245) * b.loss, 22, 6);
+      drawSingleLineFittedText(ctx, b.label, diagX + 24, by + 16, 185, 17, '600');
+      drawRoundedRect(ctx, diagX + 220, by + 2, (diagW - 250) * b.loss, 28, 8);
       ctx.fillStyle = b.col;
       ctx.fill();
     });
   } else if (activeScene.visualFocus === 'relief_drainage_underground') {
     ctx.strokeStyle = '#06b6d4';
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 3.5;
     ctx.beginPath();
-    ctx.moveTo(diagX + 28, diagY + 38);
-    ctx.lineTo(diagX + 210, diagY + 118);
+    ctx.moveTo(diagX + 28, diagY + 48);
+    ctx.lineTo(diagX + 210, diagY + 168);
     ctx.stroke();
 
     const tx = diagX + 236;
@@ -732,91 +776,91 @@ export function renderPromoVideoFrameOnCanvas({
     ctx.fillStyle = '#22d3ee';
     drawSingleLineFittedText(
       ctx,
-      '1. Нагорная дрена-перехватчик (верх участка)',
+      '1. Подземный этаж дома (−2.5 м) с перегородками',
       tx,
-      diagY + 44,
+      diagY + 58,
       tw,
-      17,
+      18,
       'bold'
     );
     ctx.fillStyle = '#38bdf8';
     drawSingleLineFittedText(
       ctx,
-      '2. Ливневые лотки вдоль отмостки здания',
+      '2. Подземный водопровод (−1.8 м) ниже промерзания',
       tx,
-      diagY + 82,
+      diagY + 112,
       tw,
-      17,
+      18,
       'bold'
     );
     ctx.fillStyle = '#818cf8';
     drawSingleLineFittedText(
       ctx,
-      '3. Дренажный колодец-коллектор в нижней точке',
+      '3. Нагорная дрена и дренажный колодец-коллектор',
       tx,
-      diagY + 120,
+      diagY + 166,
       tw,
-      17,
+      18,
       'bold'
     );
   } else if (activeScene.visualFocus === 'legal_claim_defense') {
-    drawRoundedRect(ctx, diagX + 24, diagY + 24, 170, 112, 10);
+    drawRoundedRect(ctx, diagX + 24, diagY + 36, 175, 152, 12);
     ctx.strokeStyle = '#f43f5e';
     ctx.lineWidth = 3;
     ctx.stroke();
     ctx.fillStyle = '#f43f5e';
-    drawSingleLineFittedText(ctx, 'ДОСУДЕБНАЯ', diagX + 109, diagY + 64, 148, 17, 'bold', 'Inter, sans-serif', 'center');
-    drawSingleLineFittedText(ctx, 'ПРЕТЕНЗИЯ РФ', diagX + 109, diagY + 94, 148, 17, 'bold', 'Inter, sans-serif', 'center');
+    drawSingleLineFittedText(ctx, 'ДОСУДЕБНАЯ', diagX + 111, diagY + 94, 152, 18, 'bold', 'Inter, sans-serif', 'center');
+    drawSingleLineFittedText(ctx, 'ПРЕТЕНЗИЯ РФ', diagX + 111, diagY + 128, 152, 18, 'bold', 'Inter, sans-serif', 'center');
 
-    const tx = diagX + 216;
-    const tw = diagW - 236;
+    const tx = diagX + 222;
+    const tw = diagW - 242;
     ctx.fillStyle = '#f8fafc';
-    drawSingleLineFittedText(ctx, 'Авто-генерация правовых документов:', tx, diagY + 46, tw, 18, 'bold');
+    drawSingleLineFittedText(ctx, 'Авто-генерация правовых документов:', tx, diagY + 62, tw, 19, 'bold');
     ctx.fillStyle = '#cbd5e1';
-    drawSingleLineFittedText(ctx, '• Требование об устранении нарушений (ст. 304 ГК РФ)', tx, diagY + 84, tw, 16, 'normal');
-    drawSingleLineFittedText(ctx, '• Письменное согласие соседей на забор и отступы', tx, diagY + 118, tw, 16, 'normal');
+    drawSingleLineFittedText(ctx, '• Требование об устранении нарушений (ст. 304 ГК РФ)', tx, diagY + 114, tw, 17, 'normal');
+    drawSingleLineFittedText(ctx, '• Письменное согласие соседей на забор и отступы', tx, diagY + 162, tw, 17, 'normal');
   } else {
     const tx = diagX + 26;
     const tw = diagW - 52;
     ctx.fillStyle = '#38bdf8';
-    drawSingleLineFittedText(ctx, 'АКТИВНЫЕ МОДУЛИ ИНЖЕНЕРНОГО ЯДРА:', tx, diagY + 38, tw, 18, 'bold');
+    drawSingleLineFittedText(ctx, 'АКТИВНЫЕ МОДУЛИ ИНЖЕНЕРНОГО ЯДРА:', tx, diagY + 46, tw, 19, 'bold');
     ctx.fillStyle = '#cbd5e1';
     drawSingleLineFittedText(
       ctx,
       '✓ 19 типов объектов с индивидуальными полями (дом, скважина, трубы)',
       tx,
-      diagY + 74,
+      diagY + 94,
       tw,
-      16,
+      17,
       'normal'
     );
     drawSingleLineFittedText(
       ctx,
       '✓ Ввод рыночных цен за м³/м² в смете + экспорт полного отчета в PDF',
       tx,
-      diagY + 106,
+      diagY + 140,
       tw,
-      16,
+      17,
       'normal'
     );
     drawSingleLineFittedText(
       ctx,
       '✓ Встроенный MCP-сервер (JSON-RPC 2.0) для управления через ИИ',
       tx,
-      diagY + 138,
+      diagY + 186,
       tw,
-      16,
+      17,
       'normal'
     );
   }
   ctx.restore();
   ctx.restore(); // End Right Stage
 
-  // 6. LOWER-THIRD EXPLANATORY TEXT PLAQUES (Y: 732..1002, H: 270)
+  // 5. LOWER-THIRD EXPLANATORY TEXT PLAQUES (Y: 730..1002, H: 272)
   // Plaque 1 (Left): ЧТО ПРОИСХОДИТ НА ЭКРАНЕ
-  // Plaque 2 (Right): ЗАЧЕМ ЭТО ДЕЛАЕТСЯ (ПРАКТИЧЕСКАЯ ВЫГОДА)
-  const plaqueY = 732;
-  const plaqueH = 268;
+  // Plaque 2 (Right): ЗАЧЕМ ЭТО ДЕЛАТЬСЯ (ПРАКТИЧЕСКАЯ ВЫГОДА)
+  const plaqueY = 730;
+  const plaqueH = 272;
   const plaqueW = (VW - 108) / 2; // 906px each
   const p1X = 42;
   const p2X = 42 + plaqueW + 24;
@@ -893,9 +937,9 @@ export function renderPromoVideoFrameOnCanvas({
   );
   ctx.restore();
 
-  // 7. Bottom Timeline Progress Track (Y: 1022..1044)
+  // 6. Bottom Timeline Progress Track (Y: 1022..1042)
   const barX = 42;
-  const barY = 1024;
+  const barY = 1022;
   const barW = VW - 84;
   const barH = 18;
   drawRoundedRect(ctx, barX, barY, barW, barH, 9);
